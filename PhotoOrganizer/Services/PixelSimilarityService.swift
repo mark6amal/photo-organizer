@@ -10,7 +10,11 @@ actor PixelSimilarityService {
 
     // MARK: - Public API
 
-    func cluster(photos: [Photo], threshold: Float = 0.06) async -> [[Photo]] {
+    func cluster(
+        photos: [Photo],
+        mode: AppState.SimilarityMode = .balanced,
+        threshold: Float = 0.06
+    ) async -> [[Photo]] {
         guard !photos.isEmpty else { return [] }
         guard photos.count > 1 else { return [photos] }
 
@@ -41,8 +45,23 @@ actor PixelSimilarityService {
         }
 
         let keys = grayscaleMaps.keys.sorted()
+        let maxNeighborDistance: Int? = switch mode {
+        case .fastBurst:
+            1
+        case .balanced:
+            3
+        case .thorough:
+            nil
+        }
+
         for i in 0..<keys.count {
-            for j in (i + 1)..<keys.count {
+            let upperBound = if let maxNeighborDistance {
+                min(keys.count, i + maxNeighborDistance + 1)
+            } else {
+                keys.count
+            }
+
+            for j in (i + 1)..<upperBound {
                 let a = keys[i]
                 let b = keys[j]
                 guard
