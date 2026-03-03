@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Xcode user data
+xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager / Xcode build output
+.build/
+DerivedData/
+build/
+*.build/
+*.app
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+*.xcresult
+
+# Local sample assets
+TestPhotos/
+
+# Local app/runtime artifacts
+*.swp
+*.tmp
