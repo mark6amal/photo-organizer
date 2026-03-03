@@ -5,6 +5,32 @@ import Foundation
 final class AppState {
 
     enum ViewMode { case filmstrip, grid }
+    enum SimilarityMode: String, CaseIterable, Identifiable {
+        case fastBurst
+        case balanced
+        case thorough
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .fastBurst: return "Fast"
+            case .balanced: return "Balanced"
+            case .thorough: return "Thorough"
+            }
+        }
+
+        var helpText: String {
+            switch self {
+            case .fastBurst:
+                return "Compare adjacent burst frames only. Lowest CPU."
+            case .balanced:
+                return "Compare within a small local window. Good default."
+            case .thorough:
+                return "Compare all pairs inside each time group. Slowest."
+            }
+        }
+    }
 
     // MARK: - State
 
@@ -27,6 +53,7 @@ final class AppState {
     var similarityEnabled: Bool = false
     var isSimilarityComputing: Bool = false
     var similarityThreshold: Float = 0.06
+    var similarityMode: SimilarityMode = .balanced
 
     // Histogram
     var histogramEnabled: Bool = false
@@ -180,6 +207,7 @@ final class AppState {
         for i in 0..<groups.count {
             groups[i].clusters = await PixelSimilarityService.shared.cluster(
                 photos: groups[i].photos,
+                mode: similarityMode,
                 threshold: similarityThreshold
             )
             for photo in groups[i].photos {

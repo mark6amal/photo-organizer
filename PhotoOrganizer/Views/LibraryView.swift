@@ -257,6 +257,23 @@ struct LibraryView: View {
             }
 
             Section("Visual Similarity") {
+                LabeledContent("Mode") {
+                    Picker("Similarity Mode", selection: .init(
+                        get: { appState.similarityMode },
+                        set: { newValue in
+                            appState.similarityMode = newValue
+                            guard appState.similarityEnabled else { return }
+                            Task { await appState.computeSimilarity() }
+                        }
+                    )) {
+                        ForEach(AppState.SimilarityMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                }
+
                 LabeledContent("RMS delta") {
                     HStack {
                         Slider(value: .init(
@@ -271,6 +288,10 @@ struct LibraryView: View {
                 }
 
                 Text("Lower = stricter matching. Re-run similarity after changing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(appState.similarityMode.helpText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
