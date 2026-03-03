@@ -219,6 +219,7 @@ final class AppState {
     func loadPhotos(from url: URL) async {
         isScanning = true
         scanError = nil
+        await ThumbnailService.shared.clearAll()
         photos = []
         selectedIDs = []
         currentPhotoIndex = 0
@@ -247,6 +248,7 @@ final class AppState {
         loupeEnabled = false
         metadataEnabled = false
         sharpnessScores = [:]
+        Task { await ThumbnailService.shared.clearAll() }
         SessionStore.clear()
     }
 }
