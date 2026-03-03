@@ -56,7 +56,11 @@ struct ThumbnailCell: View {
                 )
         )
         .task(id: photo.id) {
-            thumbnail = await ThumbnailService.shared.thumbnail(for: photo.thumbnailSourceURL)
+            let pixelSize = max(192, min(512, Int(size * 2)))
+            thumbnail = await ThumbnailService.shared.thumbnail(
+                for: photo.thumbnailSourceURL,
+                maxPixelSize: pixelSize
+            )
         }
         .task(id: HistTaskID(photoID: photo.id, show: showHistogram)) {
             guard showHistogram else { histData = nil; return }

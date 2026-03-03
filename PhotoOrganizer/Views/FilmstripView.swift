@@ -147,13 +147,24 @@ struct FilmstripView: View {
                 previewImage = nil
                 thumbnailImage = nil
                 guard let photo = appState.currentPhoto else { return }
+                let currentID = photo.id
+                let currentURL = photo.thumbnailSourceURL
 
-                thumbnailImage = await ThumbnailService.shared.thumbnail(for: photo.thumbnailSourceURL)
+                await ThumbnailService.shared.retainWindow(
+                    currentURL: currentURL,
+                    nearbyURLs: retentionWindowURLs(around: currentID)
+                )
 
-                if let full = await ThumbnailService.shared.fullResolution(for: photo.thumbnailSourceURL) {
+                thumbnailImage = await ThumbnailService.shared.thumbnail(for: currentURL, maxPixelSize: 512)
+
+                if let preview = await ThumbnailService.shared.preview(for: currentURL, maxPixelSize: 2200),
+                   appState.currentPhoto?.id == currentID {
+                    previewImage = preview
+                }
+
+                if let full = await ThumbnailService.shared.fullResolution(for: currentURL),
+                   appState.currentPhoto?.id == currentID {
                     previewImage = full
-                } else {
-                    previewImage = await ThumbnailService.shared.preview(for: photo.thumbnailSourceURL)
                 }
             }
         }
@@ -346,6 +357,14 @@ struct FilmstripView: View {
             width: clamp(offset.width, to: (-maxX)...maxX),
             height: clamp(offset.height, to: (-maxY)...maxY)
         )
+    }
+
+    private func retentionWindowURLs(around photoID: UUID, radius: Int = 24) -> [URL] {
+        guard let currentIndex = photos.firstIndex(where: { $0.id == photoID }) else { return [] }
+        let start = max(0, currentIndex - radius)
+        let end = min(photos.count - 1, currentIndex + radius)
+        guard start <= end else { return [] }
+        return photos[start...end].map(\.thumbnailSourceURL)
     }
 }
 

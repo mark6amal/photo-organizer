@@ -53,7 +53,7 @@ struct CarouselCell: View {
         .scaleEffect(isActive ? 1.0 : 0.88)
         .animation(.easeInOut(duration: 0.12), value: isActive)
         .task(id: photo.id) {
-            thumbnail = await ThumbnailService.shared.thumbnail(for: photo.thumbnailSourceURL)
+            thumbnail = await ThumbnailService.shared.thumbnail(for: photo.thumbnailSourceURL, maxPixelSize: 256)
         }
     }
 }
