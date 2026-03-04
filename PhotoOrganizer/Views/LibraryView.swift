@@ -3,7 +3,6 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
 
-    @State private var showWinnersOnly = false
     @State private var showExport = false
     @State private var showNewRoundAlert = false
     @State private var showSettings = false
@@ -20,6 +19,11 @@ struct LibraryView: View {
                 }
             }
             .toolbar { toolbarItems }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !appState.photos.isEmpty {
+                    filterBar
+                }
+            }
         }
         .onChange(of: appState.photos.count) { _, newCount in
             guard appState.groupingEnabled, newCount > 0 else { return }
@@ -34,11 +38,98 @@ struct LibraryView: View {
         .alert("Start New Round?", isPresented: $showNewRoundAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Start Round \(appState.rounds.count + 2)") {
-                showWinnersOnly = false
                 appState.startNewRound()
             }
         } message: {
             Text("Your \(appState.keptCount) kept photo\(appState.keptCount == 1 ? "" : "s") will become the pool for the next round.")
+        }
+    }
+
+    // MARK: - Filter Bar
+
+    private var filterBar: some View {
+        HStack(spacing: 0) {
+            ForEach(AppState.DecisionFilter.allCases) { filter in
+                let count = filterCount(for: filter)
+                let isSelected = appState.activeFilter == filter
+
+                Button {
+                    appState.activeFilter = filter
+                    // Snap current index to the first matching photo when filter changes
+                    if filter != .all {
+                        let indices = appState.filteredPhotoIndices
+                        if let idx = indices.first, !indices.contains(appState.currentPhotoIndex) {
+                            appState.currentPhotoIndex = idx
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: filter.systemImage)
+                            .font(.system(size: 11))
+                        Text(filter.label)
+                            .font(.caption.weight(.medium))
+                        if filter != .all {
+                            Text("\(count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        isSelected
+                            ? filterAccentColor(for: filter).opacity(0.25)
+                            : Color.clear
+                    )
+                    .foregroundStyle(
+                        isSelected
+                            ? filterAccentColor(for: filter)
+                            : Color.primary.opacity(0.6)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if filter != AppState.DecisionFilter.allCases.last {
+                    Divider()
+                        .frame(height: 14)
+                        .padding(.horizontal, 2)
+                }
+            }
+
+            Spacer()
+
+            if appState.activeFilter != .all {
+                Text("\(appState.filteredPhotoCount) shown")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .padding(.trailing, 12)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private func filterCount(for filter: AppState.DecisionFilter) -> Int {
+        switch filter {
+        case .all: return appState.photos.count
+        case .kept: return appState.keptCount
+        case .rejected: return appState.rejectedPhotos.count
+        case .undecided: return appState.undecidedPhotos.count
+        }
+    }
+
+    private func filterAccentColor(for filter: AppState.DecisionFilter) -> Color {
+        switch filter {
+        case .all: return .primary
+        case .kept: return .green
+        case .rejected: return .red
+        case .undecided: return .orange
         }
     }
 
@@ -100,9 +191,15 @@ struct LibraryView: View {
                 FilmstripView()
             case .grid:
                 if appState.groupingEnabled {
-                    GroupedGridView(showWinnersOnly: $showWinnersOnly)
+                    GroupedGridView(activeFilter: .init(
+                        get: { appState.activeFilter },
+                        set: { appState.activeFilter = $0 }
+                    ))
                 } else {
-                    FlatGridView(showWinnersOnly: $showWinnersOnly)
+                    FlatGridView(activeFilter: .init(
+                        get: { appState.activeFilter },
+                        set: { appState.activeFilter = $0 }
+                    ))
                 }
             }
         }
@@ -133,16 +230,6 @@ struct LibraryView: View {
             .fixedSize()
             .help("Switch between filmstrip and grid view")
             .disabled(appState.photos.isEmpty)
-        }
-
-        // Winners-only (grid only)
-        ToolbarItem {
-            Toggle(isOn: $showWinnersOnly) {
-                Label("Keepers Only", systemImage: showWinnersOnly ? "star.fill" : "star")
-            }
-            .toggleStyle(.button)
-            .disabled(!appState.hasKeptPhotos || appState.viewMode == .filmstrip)
-            .help("Show kept photos only")
         }
 
         ToolbarItemGroup {
@@ -177,6 +264,20 @@ struct LibraryView: View {
             .toggleStyle(.button)
             .disabled(appState.photos.isEmpty)
             .help("Show tonal histogram overlay")
+
+            // Comparison mode (filmstrip only)
+            Toggle(isOn: .init(
+                get: { appState.comparisonEnabled },
+                set: { newVal in
+                    if newVal { appState.toggleComparison() }
+                    else { appState.comparisonEnabled = false; appState.comparisonPhotoID = nil }
+                }
+            )) {
+                Label("Compare", systemImage: "rectangle.split.2x1")
+            }
+            .toggleStyle(.button)
+            .disabled(appState.photos.isEmpty || appState.viewMode == .grid)
+            .help("Side-by-side A/B comparison (C)")
         }
 
         // Group by Time
@@ -297,6 +398,17 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
 
                 Text(appState.similarityMode.helpText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Workflow") {
+                Toggle("Auto-advance after Keep/Reject", isOn: .init(
+                    get: { appState.autoAdvanceEnabled },
+                    set: { appState.autoAdvanceEnabled = $0 }
+                ))
+
+                Text("Automatically move to the next photo after marking a decision.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

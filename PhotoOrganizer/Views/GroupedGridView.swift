@@ -2,7 +2,7 @@ import SwiftUI
 
 struct GroupedGridView: View {
     @Environment(AppState.self) private var appState
-    @Binding var showWinnersOnly: Bool
+    @Binding var activeFilter: AppState.DecisionFilter
 
     @State private var thumbnailSize: CGFloat = 160
 
@@ -81,7 +81,12 @@ struct GroupedGridView: View {
     }
 
     private func filter(_ photos: [Photo]) -> [Photo] {
-        showWinnersOnly ? photos.filter { appState.isKept($0) } : photos
+        switch activeFilter {
+        case .all: return photos
+        case .kept: return photos.filter { appState.isKept($0) }
+        case .rejected: return photos.filter { appState.isRejected($0) }
+        case .undecided: return photos.filter { appState.decisionState(for: $0) == .undecided }
+        }
     }
 
     // MARK: - Status bar
