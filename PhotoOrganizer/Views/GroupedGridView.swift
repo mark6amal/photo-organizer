@@ -88,8 +88,14 @@ struct GroupedGridView: View {
                 ProgressView().scaleEffect(0.7)
                 Text("Grouping…").font(.caption).foregroundStyle(.secondary)
             } else if appState.isSimilarityComputing {
-                ProgressView().scaleEffect(0.7)
                 Text("Computing similarity…").font(.caption).foregroundStyle(.secondary)
+                ProgressView(value: appState.similarityProgressFraction)
+                    .progressViewStyle(.linear)
+                    .frame(width: 120)
+                Text(appState.similarityProgressText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             } else {
                 let g = appState.groups.count, p = appState.photos.count
                 Text("\(g) group\(g == 1 ? "" : "s") · \(p) photo\(p == 1 ? "" : "s")")
