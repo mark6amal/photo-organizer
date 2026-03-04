@@ -16,10 +16,12 @@ enum SessionStore {
     static func save(_ state: AppState) {
         guard let url = sessionURL else { return }
         let decisions = state.photoDecisions.map { StoredDecision(id: $0.key, state: $0.value) }
+        let ratings = state.photoRatings.map { StoredRating(id: $0.key, rating: $0.value) }
         let data = SessionData(
             sourceURL: state.sourceURL,
             photos: state.photos,
             decisions: decisions,
+            ratings: ratings,
             legacySelectedIDs: Array(state.selectedIDs),
             rounds: state.rounds,
             viewMode: state.viewMode == .filmstrip ? "filmstrip" : "grid"
@@ -43,6 +45,7 @@ enum SessionStore {
         state.sourceURL = session.sourceURL
         state.photos = validPhotos
         state.photoDecisions = session.restoredDecisions(validIDs: validIDs)
+        state.photoRatings = session.restoredRatings(validIDs: validIDs)
         state.rounds = session.rounds
         state.viewMode = session.viewMode == "grid" ? .grid : .filmstrip
         state.currentPhotoIndex = 0
@@ -59,10 +62,16 @@ private struct StoredDecision: Codable {
     let state: DecisionState
 }
 
+private struct StoredRating: Codable {
+    let id: UUID
+    let rating: Int
+}
+
 private struct SessionData: Codable {
     let sourceURL: URL?
     let photos: [Photo]
     let decisions: [StoredDecision]
+    let ratings: [StoredRating]
     let legacySelectedIDs: [UUID]
     let rounds: [SelectionRound]
     let viewMode: String
@@ -71,6 +80,7 @@ private struct SessionData: Codable {
         sourceURL: URL?,
         photos: [Photo],
         decisions: [StoredDecision],
+        ratings: [StoredRating],
         legacySelectedIDs: [UUID],
         rounds: [SelectionRound],
         viewMode: String
@@ -78,6 +88,7 @@ private struct SessionData: Codable {
         self.sourceURL = sourceURL
         self.photos = photos
         self.decisions = decisions
+        self.ratings = ratings
         self.legacySelectedIDs = legacySelectedIDs
         self.rounds = rounds
         self.viewMode = viewMode
@@ -87,6 +98,7 @@ private struct SessionData: Codable {
         case sourceURL
         case photos
         case decisions
+        case ratings
         case legacySelectedIDs = "selectedIDs"
         case rounds
         case viewMode
@@ -97,6 +109,7 @@ private struct SessionData: Codable {
         sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
         photos = try container.decode([Photo].self, forKey: .photos)
         decisions = try container.decodeIfPresent([StoredDecision].self, forKey: .decisions) ?? []
+        ratings = try container.decodeIfPresent([StoredRating].self, forKey: .ratings) ?? []
         legacySelectedIDs = try container.decodeIfPresent([UUID].self, forKey: .legacySelectedIDs) ?? []
         rounds = try container.decodeIfPresent([SelectionRound].self, forKey: .rounds) ?? []
         viewMode = try container.decodeIfPresent(String.self, forKey: .viewMode) ?? "filmstrip"
@@ -107,6 +120,7 @@ private struct SessionData: Codable {
         try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
         try container.encode(photos, forKey: .photos)
         try container.encode(decisions, forKey: .decisions)
+        try container.encode(ratings, forKey: .ratings)
         try container.encode(legacySelectedIDs, forKey: .legacySelectedIDs)
         try container.encode(rounds, forKey: .rounds)
         try container.encode(viewMode, forKey: .viewMode)
@@ -123,6 +137,13 @@ private struct SessionData: Codable {
         return legacySelectedIDs.reduce(into: [UUID: DecisionState]()) { partial, id in
             guard validIDs.contains(id) else { return }
             partial[id] = .kept
+        }
+    }
+
+    func restoredRatings(validIDs: Set<UUID>) -> [UUID: Int] {
+        ratings.reduce(into: [UUID: Int]()) { partial, entry in
+            guard validIDs.contains(entry.id) else { return }
+            partial[entry.id] = entry.rating
         }
     }
 }

@@ -7,13 +7,17 @@ enum DecisionState: String, Codable, Sendable {
 }
 
 struct PhotoQualitySignals: Sendable {
-    let sharpnessScore: Float?
-    let sharpnessLabel: String
-    let exposureLabel: String
-    let hasHighlightClipping: Bool
-    let hasShadowClipping: Bool
-    let recoverabilityHint: String
-    let isNearDuplicate: Bool
+    var sharpnessScore: Float?
+    var sharpnessLabel: String
+    var exposureLabel: String
+    var hasHighlightClipping: Bool
+    var hasShadowClipping: Bool
+    var recoverabilityHint: String
+    var isNearDuplicate: Bool
+    var faceCount: Int = 0
+    var hasClosedEyes: Bool = false
+    var noiseLabel: String = ""
+    var isBestPick: Bool = false
 
     var badges: [String] {
         var values = [sharpnessLabel, exposureLabel]
@@ -21,6 +25,10 @@ struct PhotoQualitySignals: Sendable {
         if hasShadowClipping { values.append("Shadows crushed") }
         if isNearDuplicate { values.append("Likely duplicate") }
         values.append(recoverabilityHint)
+        if faceCount == 1 { values.append("1 face detected") }
+        else if faceCount > 1 { values.append("\(faceCount) faces detected") }
+        if hasClosedEyes { values.append("Eyes may be closed") }
+        if !noiseLabel.isEmpty { values.append(noiseLabel) }
         return values
     }
 }
@@ -30,6 +38,7 @@ struct PhotoQualitySignals: Sendable {
 final class AppState {
 
     enum ViewMode { case filmstrip, grid }
+
     enum SimilarityMode: String, CaseIterable, Identifiable {
         case fastBurst
         case balanced
@@ -57,11 +66,39 @@ final class AppState {
         }
     }
 
+    enum DecisionFilter: String, CaseIterable, Identifiable {
+        case all
+        case kept
+        case rejected
+        case undecided
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .all: return "All"
+            case .kept: return "Kept"
+            case .rejected: return "Rejected"
+            case .undecided: return "Undecided"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .all: return "photo.stack"
+            case .kept: return "checkmark.circle.fill"
+            case .rejected: return "xmark.circle.fill"
+            case .undecided: return "circle.dotted"
+            }
+        }
+    }
+
     // MARK: - State
 
     var sourceURL: URL?
     var photos: [Photo] = []
     var photoDecisions: [UUID: DecisionState] = [:]
+    var photoRatings: [UUID: Int] = [:]
     var rounds: [SelectionRound] = []
     var isScanning = false
     var scanError: String?
@@ -90,6 +127,16 @@ final class AppState {
 
     // Metadata panel
     var metadataEnabled: Bool = false
+
+    // Filter
+    var activeFilter: DecisionFilter = .all
+
+    // Auto-advance
+    var autoAdvanceEnabled: Bool = false
+
+    // Comparison
+    var comparisonEnabled: Bool = false
+    var comparisonPhotoID: UUID? = nil
 
     // Analysis
     var sharpnessScores: [UUID: Float] = [:]
@@ -123,6 +170,11 @@ final class AppState {
         photos.indices.contains(currentPhotoIndex) ? photos[currentPhotoIndex] : nil
     }
 
+    var comparisonPhoto: Photo? {
+        guard let id = comparisonPhotoID else { return nil }
+        return photos.first { $0.id == id }
+    }
+
     var keptPhotoIDs: Set<UUID> { selectedIDs }
     var keptPhotos: [Photo] { photos.filter { isKept($0) } }
     var rejectedPhotos: [Photo] { photos.filter { isRejected($0) } }
@@ -133,6 +185,23 @@ final class AppState {
     var hasSelection: Bool { hasKeptPhotos }
     var keptCount: Int { keptPhotoIDs.count }
     var selectionCount: Int { keptCount }
+
+    var filteredPhotoIndices: [Int] {
+        switch activeFilter {
+        case .all:
+            return Array(photos.indices)
+        case .kept:
+            return photos.indices.filter { isKept(photos[$0]) }
+        case .rejected:
+            return photos.indices.filter { isRejected(photos[$0]) }
+        case .undecided:
+            return photos.indices.filter { decisionState(for: photos[$0]) == .undecided }
+        }
+    }
+
+    var filteredPhotoCount: Int {
+        activeFilter == .all ? photos.count : filteredPhotoIndices.count
+    }
 
     var similarityProgressFraction: Double {
         guard similarityProgressTotal > 0 else { return 0 }
@@ -217,12 +286,13 @@ final class AppState {
             return "No moment"
         }
 
+        let filterSuffix = activeFilter != .all ? " · \(activeFilter.label)" : ""
         if let pos = currentPhotoIndexInMoment,
            let total = currentMomentPhotoCount,
            total > 1 {
-            return "Moment \(momentIndex + 1) of \(momentCount) · Photo \(pos)/\(total)"
+            return "Moment \(momentIndex + 1) of \(momentCount) · Photo \(pos)/\(total)\(filterSuffix)"
         }
-        return "Moment \(momentIndex + 1) of \(momentCount)"
+        return "Moment \(momentIndex + 1) of \(momentCount)\(filterSuffix)"
     }
 
     // MARK: - Decisions
@@ -275,16 +345,45 @@ final class AppState {
     func markCurrentPhotoKept() {
         guard let photo = currentPhoto else { return }
         setDecision(.kept, for: photo)
+        if autoAdvanceEnabled { advanceAfterDecision() }
     }
 
     func markCurrentPhotoRejected() {
         guard let photo = currentPhoto else { return }
         setDecision(.rejected, for: photo)
+        if autoAdvanceEnabled { advanceAfterDecision() }
     }
 
     func clearCurrentPhotoDecision() {
         guard let photo = currentPhoto else { return }
         clearDecision(for: photo)
+    }
+
+    private func advanceAfterDecision() {
+        if activeFilter != .all {
+            navigateFiltered(by: 1)
+        } else {
+            navigateMoment(by: 1)
+        }
+    }
+
+    // MARK: - Star Ratings
+
+    func rating(for photo: Photo) -> Int {
+        photoRatings[photo.id] ?? 0
+    }
+
+    func setRating(_ rating: Int, for photo: Photo) {
+        if rating == 0 {
+            photoRatings.removeValue(forKey: photo.id)
+        } else {
+            photoRatings[photo.id] = max(1, min(5, rating))
+        }
+    }
+
+    func setCurrentPhotoRating(_ rating: Int) {
+        guard let photo = currentPhoto else { return }
+        setRating(rating, for: photo)
     }
 
     // MARK: - Navigation
@@ -294,8 +393,25 @@ final class AppState {
         currentPhotoIndex = max(0, min(photos.count - 1, currentPhotoIndex + delta))
     }
 
+    func navigateFiltered(by delta: Int) {
+        let indices = filteredPhotoIndices
+        guard !indices.isEmpty else { return }
+        if let pos = indices.firstIndex(of: currentPhotoIndex) {
+            let newPos = max(0, min(indices.count - 1, pos + delta))
+            currentPhotoIndex = indices[newPos]
+        } else {
+            currentPhotoIndex = delta >= 0 ? (indices.first ?? 0) : (indices.last ?? 0)
+        }
+    }
+
     func navigateMoment(by delta: Int) {
         guard !photos.isEmpty else { return }
+
+        if activeFilter != .all {
+            navigateFiltered(by: delta)
+            return
+        }
+
         if let current = currentPhoto,
            let clusterIndex = visualClusterSequence.firstIndex(where: { cluster in
                cluster.contains(where: { $0.id == current.id })
@@ -341,6 +457,40 @@ final class AppState {
 
     func navigateWithinMoment(by delta: Int) {
         navigateWithinGroup(by: delta)
+    }
+
+    // MARK: - Comparison
+
+    func toggleComparison() {
+        if comparisonEnabled {
+            comparisonEnabled = false
+            comparisonPhotoID = nil
+        } else {
+            comparisonEnabled = true
+            // Default: compare against next photo in current moment or flat list
+            if let current = currentPhoto,
+               groupingEnabled,
+               let gi = currentGroupIndex {
+                let groupPhotos = groups[gi].photos
+                if let posInGroup = groupPhotos.firstIndex(where: { $0.id == current.id }),
+                   posInGroup + 1 < groupPhotos.count {
+                    comparisonPhotoID = groupPhotos[posInGroup + 1].id
+                } else {
+                    comparisonPhotoID = photos.indices.contains(currentPhotoIndex + 1)
+                        ? photos[currentPhotoIndex + 1].id : nil
+                }
+            } else {
+                comparisonPhotoID = photos.indices.contains(currentPhotoIndex + 1)
+                    ? photos[currentPhotoIndex + 1].id : nil
+            }
+        }
+    }
+
+    func cycleComparisonPhoto(by delta: Int) {
+        guard comparisonEnabled, let currentID = comparisonPhotoID else { return }
+        guard let idx = photos.firstIndex(where: { $0.id == currentID }) else { return }
+        let newIdx = max(0, min(photos.count - 1, idx + delta))
+        comparisonPhotoID = photos[newIdx].id
     }
 
     // MARK: - Grouping
@@ -391,6 +541,7 @@ final class AppState {
             applyCachedSimilarity(cached)
             similarityProgressCompleted = similarityProgressTotal
             isSimilarityComputing = false
+            refreshBestPickFlags()
             return
         }
 
@@ -409,18 +560,8 @@ final class AppState {
                 if let score = await PixelSimilarityService.shared.sharpness(for: photo.thumbnailSourceURL) {
                     sharpnessScores[photo.id] = score
                     sharpnessByPath[photo.thumbnailSourceURL.path] = score
-
-                    if let existing = qualitySignalsByPhotoID[photo.id] {
-                        qualitySignalsByPhotoID[photo.id] = PhotoQualitySignals(
-                            sharpnessScore: score,
-                            sharpnessLabel: Self.sharpnessLabel(for: score),
-                            exposureLabel: existing.exposureLabel,
-                            hasHighlightClipping: existing.hasHighlightClipping,
-                            hasShadowClipping: existing.hasShadowClipping,
-                            recoverabilityHint: existing.recoverabilityHint,
-                            isNearDuplicate: existing.isNearDuplicate
-                        )
-                    }
+                    qualitySignalsByPhotoID[photo.id]?.sharpnessScore = score
+                    qualitySignalsByPhotoID[photo.id]?.sharpnessLabel = Self.sharpnessLabel(for: score)
                 }
             }
         }
@@ -437,6 +578,7 @@ final class AppState {
             )
         }
         refreshDuplicateFlags()
+        refreshBestPickFlags()
         isSimilarityComputing = false
     }
 
@@ -455,35 +597,109 @@ final class AppState {
         let isNearDuplicate = duplicateClusterSize(for: photo) > 1
         if let existing = qualitySignalsByPhotoID[photo.id] {
             if existing.isNearDuplicate != isNearDuplicate {
-                qualitySignalsByPhotoID[photo.id] = PhotoQualitySignals(
-                    sharpnessScore: existing.sharpnessScore,
-                    sharpnessLabel: existing.sharpnessLabel,
-                    exposureLabel: existing.exposureLabel,
-                    hasHighlightClipping: existing.hasHighlightClipping,
-                    hasShadowClipping: existing.hasShadowClipping,
-                    recoverabilityHint: existing.recoverabilityHint,
-                    isNearDuplicate: isNearDuplicate
-                )
+                qualitySignalsByPhotoID[photo.id]?.isNearDuplicate = isNearDuplicate
             }
             return
         }
 
         async let sharpnessTask = PixelSimilarityService.shared.sharpness(for: photo.thumbnailSourceURL)
         async let histogramTask = HistogramService.shared.histogram(for: photo.thumbnailSourceURL)
+        async let noiseTask = PixelSimilarityService.shared.noiseEstimate(for: photo.thumbnailSourceURL)
+        async let faceTask = VisionService.shared.detectFaces(for: photo.thumbnailSourceURL)
+
         let sharpness = await sharpnessTask
         let histogram = await histogramTask
+        let noiseScore = await noiseTask
+        let faceResult = await faceTask
 
         if let sharpness {
             sharpnessScores[photo.id] = sharpness
         }
 
-        qualitySignalsByPhotoID[photo.id] = Self.buildQualitySignals(
+        var signals = Self.buildQualitySignals(
             for: photo,
             sharpnessScore: sharpness,
             histogram: histogram,
             isNearDuplicate: isNearDuplicate
         )
+        signals.noiseLabel = Self.noiseLabel(for: noiseScore)
+        signals.faceCount = faceResult.faceCount
+        signals.hasClosedEyes = faceResult.hasClosedEyes
+
+        qualitySignalsByPhotoID[photo.id] = signals
     }
+
+    // MARK: - Best Pick
+
+    func isBestPick(_ photo: Photo) -> Bool {
+        qualitySignalsByPhotoID[photo.id]?.isBestPick ?? false
+    }
+
+    private func refreshBestPickFlags() {
+        // Clear all best pick flags first
+        for id in qualitySignalsByPhotoID.keys {
+            qualitySignalsByPhotoID[id]?.isBestPick = false
+        }
+
+        // Determine clusters to rank
+        let clusterGroups: [[Photo]]
+        if groupingEnabled, !groups.isEmpty, similarityEnabled {
+            clusterGroups = groups.flatMap { group -> [[Photo]] in
+                guard let clusters = group.clusters, !clusters.isEmpty else {
+                    return [group.photos]
+                }
+                return clusters
+            }
+        } else if groupingEnabled, !groups.isEmpty {
+            clusterGroups = groups.map(\.photos)
+        } else {
+            // No grouping: treat all photos as one cluster (no best pick needed)
+            return
+        }
+
+        for cluster in clusterGroups where cluster.count > 1 {
+            let bestID = bestPhotoID(in: cluster)
+            qualitySignalsByPhotoID[bestID]?.isBestPick = true
+        }
+    }
+
+    private func bestPhotoID(in photos: [Photo]) -> UUID {
+        var bestID = photos[0].id
+        var bestScore: Float = -Float.infinity
+
+        for photo in photos {
+            var score: Float = 0
+            if let signals = qualitySignalsByPhotoID[photo.id] {
+                // Sharpness contribution
+                score += (signals.sharpnessScore ?? 0) * 100
+                // Penalize clipping
+                if signals.hasHighlightClipping { score -= 20 }
+                if signals.hasShadowClipping { score -= 10 }
+                // Reward balanced exposure
+                let exposurePenalty: Float
+                switch signals.exposureLabel {
+                case "Balanced": exposurePenalty = 0
+                case "Slightly dark", "Slightly bright": exposurePenalty = -5
+                default: exposurePenalty = -20
+                }
+                score += exposurePenalty
+                // Bonus for face detected (portrait sessions)
+                if signals.faceCount > 0 { score += 5 }
+                // Penalize closed eyes
+                if signals.hasClosedEyes { score -= 30 }
+            }
+            // Bonus for higher star rating
+            score += Float(photoRatings[photo.id] ?? 0) * 10
+
+            if score > bestScore {
+                bestScore = score
+                bestID = photo.id
+            }
+        }
+        return bestID
+    }
+
+    // MARK: - Private Quality Helpers
 
     private func duplicateClusterSize(for photo: Photo) -> Int {
         guard groupingEnabled, similarityEnabled else { return 0 }
@@ -497,17 +713,8 @@ final class AppState {
     }
 
     private func clearDuplicateFlags() {
-        for (id, signals) in qualitySignalsByPhotoID {
-            guard signals.isNearDuplicate else { continue }
-            qualitySignalsByPhotoID[id] = PhotoQualitySignals(
-                sharpnessScore: signals.sharpnessScore,
-                sharpnessLabel: signals.sharpnessLabel,
-                exposureLabel: signals.exposureLabel,
-                hasHighlightClipping: signals.hasHighlightClipping,
-                hasShadowClipping: signals.hasShadowClipping,
-                recoverabilityHint: signals.recoverabilityHint,
-                isNearDuplicate: false
-            )
+        for id in qualitySignalsByPhotoID.keys {
+            qualitySignalsByPhotoID[id]?.isNearDuplicate = false
         }
     }
 
@@ -516,15 +723,7 @@ final class AppState {
             guard let photo = photos.first(where: { $0.id == id }) else { continue }
             let isNearDuplicate = duplicateClusterSize(for: photo) > 1
             guard signals.isNearDuplicate != isNearDuplicate else { continue }
-            qualitySignalsByPhotoID[id] = PhotoQualitySignals(
-                sharpnessScore: signals.sharpnessScore,
-                sharpnessLabel: signals.sharpnessLabel,
-                exposureLabel: signals.exposureLabel,
-                hasHighlightClipping: signals.hasHighlightClipping,
-                hasShadowClipping: signals.hasShadowClipping,
-                recoverabilityHint: signals.recoverabilityHint,
-                isNearDuplicate: isNearDuplicate
-            )
+            qualitySignalsByPhotoID[id]?.isNearDuplicate = isNearDuplicate
         }
     }
 
@@ -593,6 +792,18 @@ final class AppState {
         }
     }
 
+    private static func noiseLabel(for score: Float?) -> String {
+        guard let score else { return "" }
+        switch score {
+        case ..<0.005:
+            return "Clean"
+        case ..<0.015:
+            return "Moderate noise"
+        default:
+            return "Heavy noise"
+        }
+    }
+
     private static func exposureLabel(for averageLuma: Float) -> String {
         switch averageLuma {
         case ..<0.18:
@@ -647,10 +858,14 @@ final class AppState {
         rounds.append(round)
         photos = round.winners
         photoDecisions = [:]
+        photoRatings = [:]
         currentPhotoIndex = 0
         groups = []
         qualitySignalsByPhotoID = [:]
         sharpnessScores = [:]
+        activeFilter = .all
+        comparisonEnabled = false
+        comparisonPhotoID = nil
         SessionStore.save(self)
     }
 
@@ -666,10 +881,14 @@ final class AppState {
         await PixelSimilarityService.shared.clearCache()
         photos = []
         photoDecisions = [:]
+        photoRatings = [:]
         currentPhotoIndex = 0
         groups = []
         sharpnessScores = [:]
         qualitySignalsByPhotoID = [:]
+        activeFilter = .all
+        comparisonEnabled = false
+        comparisonPhotoID = nil
         do {
             photos = try await FolderScanner.scan(url: url)
         } catch {
@@ -685,6 +904,7 @@ final class AppState {
         sourceURL = nil
         photos = []
         photoDecisions = [:]
+        photoRatings = [:]
         rounds = []
         scanError = nil
         isScanning = false
@@ -699,6 +919,9 @@ final class AppState {
         qualitySignalsByPhotoID = [:]
         similarityProgressCompleted = 0
         similarityProgressTotal = 0
+        activeFilter = .all
+        comparisonEnabled = false
+        comparisonPhotoID = nil
         Task {
             await ThumbnailService.shared.clearAll()
             await HistogramService.shared.clearCache()

@@ -6,6 +6,8 @@ struct ExportView: View {
 
     @State private var destination: URL?
     @State private var flatten = true
+    @State private var writeXMP = false
+    @State private var renamePattern = ""
     @State private var phase: Phase = .setup
     @State private var exportProgress: CopyService.Progress?
     @State private var exportedURL: URL?
@@ -39,7 +41,7 @@ struct ExportView: View {
             }
         }
         .padding(24)
-        .frame(width: 420)
+        .frame(width: 460)
     }
 
     // MARK: - Setup
@@ -82,12 +84,43 @@ struct ExportView: View {
             Divider()
 
             // Options
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Options").fontWeight(.medium)
+
                 Toggle("Flatten into one folder", isOn: $flatten)
                 if !flatten {
                     Text("Original subfolder structure will be preserved")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Toggle("Write XMP sidecars", isOn: $writeXMP)
+                if writeXMP {
+                    Text("Creates .xmp files with rating and pick status for Lightroom / Capture One compatibility.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Rename pattern")
+                        Spacer()
+                        if !renamePattern.isEmpty {
+                            Button("Clear") { renamePattern = "" }
+                                .buttonStyle(.plain)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    TextField("e.g. {date}_{seq}_{name}", text: $renamePattern)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.callout)
+                    Text("Tokens: {name} original filename · {seq} sequence number · {date} YYYYMMDD. Leave empty to keep original filenames.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !renamePattern.isEmpty {
+                        let preview = previewRename(pattern: renamePattern, index: 1, name: "IMG_1234", ext: "CR3")
+                        Text("Preview: \(preview)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
 
@@ -135,6 +168,12 @@ struct ExportView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if writeXMP {
+                Label("XMP sidecars written", systemImage: "doc.text")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Divider()
 
             HStack {
@@ -168,13 +207,32 @@ struct ExportView: View {
 
         let photos = appState.keptPhotos
         let root = appState.sourceURL ?? URL(fileURLWithPath: NSHomeDirectory())
-        let shouldFlatten = flatten
+        let options = CopyService.ExportOptions(
+            flatten: flatten,
+            writeXMP: writeXMP,
+            renamePattern: renamePattern,
+            decisions: appState.photoDecisions,
+            ratings: appState.photoRatings
+        )
 
         Task {
-            for await p in CopyService.export(photos: photos, to: dest, flatten: shouldFlatten, sourceRoot: root) {
+            for await p in CopyService.export(photos: photos, to: dest, sourceRoot: root, options: options) {
                 exportProgress = p
             }
             phase = .done
         }
+    }
+
+    // MARK: - Preview helper
+
+    private func previewRename(pattern: String, index: Int, name: String, ext: String) -> String {
+        let paddedSeq = String(format: "%04d", index)
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd"
+        let dateStr = f.string(from: Date())
+        let resolved = pattern
+            .replacingOccurrences(of: "{name}", with: name)
+            .replacingOccurrences(of: "{seq}", with: paddedSeq)
+            .replacingOccurrences(of: "{date}", with: dateStr)
+        return resolved.hasSuffix(".\(ext)") ? resolved : "\(resolved).\(ext)"
     }
 }

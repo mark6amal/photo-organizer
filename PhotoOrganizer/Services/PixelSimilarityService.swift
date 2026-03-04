@@ -115,9 +115,20 @@ actor PixelSimilarityService {
         return value
     }
 
+    private var noiseCache: [URL: Float] = [:]
+
+    func noiseEstimate(for url: URL) async -> Float? {
+        if let cached = noiseCache[url] { return cached }
+        guard let grayscale = await grayscale(for: url) else { return nil }
+        let value = Self.noiseRMS(grayscale)
+        noiseCache[url] = value
+        return value
+    }
+
     func clearCache() {
         grayscaleCache.removeAll()
         sharpnessCache.removeAll()
+        noiseCache.removeAll()
     }
 
     // MARK: - Cache
@@ -199,6 +210,33 @@ actor PixelSimilarityService {
         } / n
 
         return sqrt(variance)
+    }
+
+    // Estimates sensor noise by computing RMS of high-frequency residual
+    // after subtracting a 3x3 box-blurred version of the image.
+    private static func noiseRMS(_ grayscale: [Float], width: Int = 64) -> Float {
+        let height = grayscale.count / width
+        guard width > 2, height > 2 else { return 0 }
+
+        var residualSumSq: Float = 0
+        var count: Int = 0
+
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                let idx = y * width + x
+                let blurred = (
+                    grayscale[idx - width - 1] + grayscale[idx - width] + grayscale[idx - width + 1] +
+                    grayscale[idx - 1]         + grayscale[idx]         + grayscale[idx + 1] +
+                    grayscale[idx + width - 1] + grayscale[idx + width] + grayscale[idx + width + 1]
+                ) / 9.0
+                let residual = grayscale[idx] - blurred
+                residualSumSq += residual * residual
+                count += 1
+            }
+        }
+
+        guard count > 0 else { return 0 }
+        return sqrt(residualSumSq / Float(count))
     }
 
     private static func laplacianVariance(_ grayscale: [Float], width: Int = 64) -> Float {

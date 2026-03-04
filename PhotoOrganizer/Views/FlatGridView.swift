@@ -2,14 +2,19 @@ import SwiftUI
 
 struct FlatGridView: View {
     @Environment(AppState.self) private var appState
-    @Binding var showWinnersOnly: Bool
+    @Binding var activeFilter: AppState.DecisionFilter
 
     @State private var thumbnailSize: CGFloat = 180
     @State private var focusedID: UUID?
     @FocusState private var isGridFocused: Bool
 
     private var displayedPhotos: [Photo] {
-        showWinnersOnly ? appState.keptPhotos : appState.photos
+        switch activeFilter {
+        case .all: return appState.photos
+        case .kept: return appState.keptPhotos
+        case .rejected: return appState.rejectedPhotos
+        case .undecided: return appState.undecidedPhotos
+        }
     }
 
     var body: some View {
