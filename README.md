@@ -1,6 +1,6 @@
 # Photo Organizer
 
-Photo Organizer is a macOS SwiftUI app for reviewing large photo sets, grouping burst shots by capture time, clustering visually similar frames, and marking keepers for later export.
+Photo Organizer is a macOS SwiftUI app for fast culling: review large photo sets, move through moments quickly, use objective quality signals, and send keepers into editing.
 
 ## Requirements
 
@@ -84,10 +84,10 @@ Upload the generated DMG as a GitHub Release asset rather than committing it to 
 
 1. Launch the app.
 2. Choose a folder containing RAW and/or JPEG files.
-3. Use filmstrip or grid view to review images.
-4. Enable `Group by Time` to split burst sequences.
-5. Enable `Similarity` to create visual sub-clusters inside each time group.
-6. Mark keepers and export them when ready.
+3. Use the filmstrip culling workspace or grid view to review images.
+4. Enable `Group by Time` to review scenes and bursts as moments.
+5. Enable `Similarity` to create visual sub-clusters inside each moment.
+6. Mark photos as keep or reject, then send keepers to editing when ready.
 
 ## Project Layout
 

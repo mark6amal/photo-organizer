@@ -53,7 +53,7 @@ struct GroupedGridView: View {
             RoundedRectangle(cornerRadius: 1)
                 .fill(Color.secondary.opacity(0.3))
                 .frame(height: 1)
-            Text("Similar group \(index + 1) of \(total)")
+            Text("Similar set \(index + 1) of \(total)")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize()
@@ -69,15 +69,19 @@ struct GroupedGridView: View {
         ThumbnailCell(
             photo: photo,
             size: thumbnailSize,
-            isSelected: appState.isSelected(photo),
+            decisionState: appState.decisionState(for: photo),
             isFocused: false,
-            showHistogram: appState.histogramEnabled
+            showHistogram: appState.histogramEnabled,
+            qualitySignals: appState.qualitySignals(for: photo)
         )
         .onTapGesture { appState.toggleSelected(photo) }
+        .task(id: photo.id) {
+            await appState.ensureQualitySignals(for: photo)
+        }
     }
 
     private func filter(_ photos: [Photo]) -> [Photo] {
-        showWinnersOnly ? photos.filter { appState.isSelected($0) } : photos
+        showWinnersOnly ? photos.filter { appState.isKept($0) } : photos
     }
 
     // MARK: - Status bar
@@ -98,10 +102,10 @@ struct GroupedGridView: View {
                     .monospacedDigit()
             } else {
                 let g = appState.groups.count, p = appState.photos.count
-                Text("\(g) group\(g == 1 ? "" : "s") · \(p) photo\(p == 1 ? "" : "s")")
+                Text("\(g) moment\(g == 1 ? "" : "s") · \(p) photo\(p == 1 ? "" : "s")")
                     .font(.caption).foregroundStyle(.secondary)
-                if appState.hasSelection {
-                    Text("· \(appState.selectionCount) selected")
+                if appState.hasKeptPhotos {
+                    Text("· \(appState.keptCount) kept")
                         .font(.caption).foregroundStyle(.green)
                 }
             }
@@ -130,9 +134,13 @@ private struct GroupHeaderRow: View {
                     .frame(width: 12)
                     .foregroundStyle(.secondary)
 
-                Text(group.label)
+                Text(group.momentTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
+
+                Text("· \(group.label)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 let p = group.photos.count
                 Text("· \(p) photo\(p == 1 ? "" : "s")")
@@ -144,7 +152,7 @@ private struct GroupHeaderRow: View {
                 }
 
                 if let clusters = group.clusters, appState.similarityEnabled {
-                    Text("· \(clusters.count) visual group\(clusters.count == 1 ? "" : "s")")
+                    Text("· \(clusters.count) visual set\(clusters.count == 1 ? "" : "s")")
                         .font(.caption).foregroundStyle(.blue.opacity(0.7))
                 }
 

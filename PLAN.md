@@ -1,190 +1,160 @@
-# Photo Organizer App — Plan
+# Photo Organizer Product Roadmap
 
-## Context
-A macOS native app for photographers who shoot large volumes (1000s) of RAW+JPEG photos. The core workflow is simple: **pick winners, copy them out**. Everything else (grouping, smart clustering, histogram analysis) is an optional enhancement the user can toggle on.
+## Product Vision
 
----
+Photo Organizer should help photographers move from a large set of RAW and JPEG captures to a small set of confident keepers as quickly as possible. The product is centered on fast culling, moment-based review, and clear objective photo truths that help the user decide what is worth sending into editing.
 
-## Core Workflow (always available)
-1. **Pick a source folder** → folder picker UI on launch
-2. **Preview photos** → filmstrip view: one large photo + scrollable carousel at the bottom
-3. **Mark winners** → `K` to keep, `←/→` to navigate; also available in grid view
-4. **Export winners** → copy to a destination folder
-5. **Repeat** → start a new round from previous winners
+## Core User Jobs
 
----
+1. Go from raw photos to selected keepers fast, then export them into an editing workflow.
+2. Scrub through travel photos quickly, focusing on the best moment instead of getting stuck on individual files.
+3. Judge whether a photo is viable using practical signals like focus, exposure balance, clipping risk, and likely recoverability.
 
-## Primary UI: Filmstrip View
-The default viewing mode. Designed for careful one-at-a-time culling.
+## Product Principles
 
-```
-┌─────────────────────────────────────────────────────┐
-│  [toolbar: Change Folder | Grid | ★ Winners | Export]│
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│                                                     │
-│              [ large photo preview ]                │
-│                                                     │
-│                                                     │
-├─────────────────────────────────────────────────────┤
-│  [thumb][thumb][THUMB*][thumb][thumb][thumb][thumb] │  ← carousel
-└─────────────────────────────────────────────────────┘
-   * active photo highlighted, carousel scrolls with it
-```
+1. Speed first. The main workflow should optimize for momentum and keyboard-first culling.
+2. Assistive, not opinionated. The app should show evidence and guidance, not auto-pick for the user.
+3. Moments over files. The default mental model should be reviewing a burst or scene as a single decision unit.
+4. Export is a handoff. The app ends when the user has clean keepers ready for editing.
 
-**Keyboard shortcuts:**
-- `←` / `→` — previous / next photo (carousel follows)
-- `K` — toggle winner (green checkmark overlay on thumbnail)
-- `Space` — also toggles winner
-- Click a carousel thumbnail → jump to that photo
+## Core Workflow
 
-**Winner state:**
-- Carousel thumbnails show green checkmark + tint when marked
-- Status bar: `X of Y selected`
+1. Open a folder of RAW and/or JPEG files.
+2. Review photos in the culling workspace.
+3. Move between moments and compare alternates inside a moment.
+4. Mark photos as keep, reject, or leave them undecided.
+5. Start a new round from kept photos when the user wants another pass.
+6. Export keepers to a destination folder for editing.
 
----
+## UX Model
 
-## Secondary UI: Grid View
-Overview / batch mode. Toggle via toolbar icon (like Finder's view switcher).
-Good for: spotting obvious duds across many photos, reviewing all picks at once.
+### Culling Workspace
 
-- Adaptive thumbnail grid, size adjustable with slider
-- Click or Space to toggle winner
-- `←/→` arrow keys navigate with focus ring
-- "Winners Only" filter in toolbar
-- Same green checkmark overlay as filmstrip
+The default experience is a filmstrip-based culling workspace:
 
----
+- Large centered preview for the current image
+- Bottom strip of nearby frames for quick context
+- Compact decision rail for quality signals
+- Keep, reject, and navigation controls that work without opening side panels
 
-## Optional Features (user-toggleable via toolbar/settings)
-- **Time-based grouping** — collapses burst shots into groups by capture time proximity (gap threshold configurable); works in both views
-- **Visual similarity sub-grouping** — within time groups, clusters visually similar shots using Apple Vision (toggleable)
-- **Histogram overlay** — RGB + luminosity histogram per photo; mini-bar in carousel/grid, full chart in filmstrip detail area
+### Moment Navigation
 
----
+- A moment is a time-based group of nearby captures.
+- Similarity clustering can further split a moment into visually similar sub-groups.
+- Left and right move between moments.
+- Up and down move within the current moment.
+- The UI should show clear progress such as the current moment, total moments, and frame count inside the moment.
 
-## Tech Stack
-- **Language**: Swift
-- **UI**: SwiftUI (macOS 14+ Sonoma target)
-- **Image decoding**: `ImageIO` — handles RAW (CR2, CR3, NEF, ARW, DNG), JPEG, HEIC; extracts embedded JPEG previews for fast thumbnails
-- **EXIF / metadata**: `ImageIO` (`CGImageSourceCopyPropertiesAtIndex`) — reads `DateTimeOriginal` for time grouping
-- **Visual similarity**: Apple `Vision` — `VNGenerateImageFeaturePrintRequest` feature vectors + cosine distance
-- **Histogram**: `Accelerate` framework — `vImageHistogramCalculation` on decoded pixel buffer; renders RGB + luminosity curves
-- **File ops**: `Foundation.FileManager` for scanning and copying
+### Decision States
 
----
+Each photo can be:
 
-## Architecture
+- `undecided`
+- `kept`
+- `rejected`
 
-```
-PhotoOrganizer.app
-├── Models/
-│   ├── Photo.swift            — single photo (path, format, optional JPEG pair, thumbnail cache)
-│   ├── PhotoGroup.swift       — optional time/visual cluster (used only when grouping is enabled)
-│   ├── SelectionRound.swift   — one round: source pool → selected winners         ✅ done
-│   └── AppState.swift         — top-level observable state (source folder, rounds, view mode, features)  ✅ done
-│
-├── Services/
-│   ├── FolderScanner.swift    — recursive scan; detects RAW+JPEG pairs by matching base filename  ✅ done
-│   ├── ThumbnailService.swift — async thumbnail generation via ImageIO embedded JPEG previews     ✅ done
-│   ├── GroupingService.swift  — optional: clusters by EXIF capture time (default gap: 5s)
-│   ├── VisionService.swift    — optional: VNFeaturePrint per image; cosine distance sub-clustering
-│   ├── HistogramService.swift — optional: vImageHistogramCalculation on decoded image buffer
-│   ├── EXIFService.swift      — reads DateTimeOriginal, camera model, ISO, shutter, aperture
-│   └── CopyService.swift      — copies winners to destination; async stream progress reporting    ✅ done
-│
-└── Views/
-    ├── WelcomeView.swift       — app launch: "Open Folder" button + drag-and-drop zone            ✅ done
-    ├── LibraryView.swift       — main container: toolbar, sidebar (round history), view switcher  ✅ done
-    ├── FilmstripView.swift     — PRIMARY: large photo + bottom carousel; K/←/→ shortcuts         ← next
-    ├── CarouselCell.swift      — one thumbnail in the filmstrip carousel; winner overlay
-    ├── FlatGridView.swift      — SECONDARY: all photos in adaptive scrollable grid                ✅ done
-    ├── GroupedGridView.swift   — optional: photos nested under collapsible time/visual groups
-    ├── ThumbnailCell.swift     — grid cell: thumbnail, winner checkmark overlay                   ✅ done
-    ├── ExportView.swift        — destination picker, progress bar, flatten option                 ✅ done
-    └── HistogramView.swift     — full RGB + luminosity chart (shown in filmstrip detail area)
-```
+Kept photos drive:
 
----
+- new rounds
+- keep-only filtering
+- export
 
-## Key Implementation Notes
+### Quality Signals
 
-### Folder Picker (Entry Point)
-- `WelcomeView` shown on launch if no source folder loaded
-- Uses `NSOpenPanel` (folder selection); drag-and-drop also supported
-- After loading: immediately switches to `LibraryView` → `FilmstripView` and begins async thumbnail generation
+The product should show simple, human-readable cues:
 
-### RAW + JPEG Pair Detection
-- Bucket files by base filename (strip extension, case-insensitive)
-- If base has both a RAW ext (cr2, cr3, nef, arw, dng) AND a JPEG ext (jpg, jpeg) → treat as a pair
-- **Preview/thumbnail**: use JPEG (fast decode); fall back to embedded RAW preview via `kCGImageSourceThumbnailMaxPixelSize`
-- **Copy on export**: always copy RAW; copy JPEG sidecar alongside it
+- sharpness
+- exposure balance
+- highlight clipping risk
+- shadow clipping risk
+- likely recoverability
+- duplicate density inside the current moment
 
-### Filmstrip View
-- Large photo occupies ~80% of the window height; rendered full-quality via ImageIO (not just the embedded thumbnail)
-- Carousel at the bottom: horizontally scrollable, fixed height ~90px, shows all photos
-- Active photo in carousel is highlighted and kept centred as you navigate
-- Navigation and selection is mirrored: marking a photo in filmstrip marks it in grid and vice versa
+These signals are assistive heuristics, not hard judgments.
 
-### Winner Selection
-- `K` or `Space` → toggle winner on current photo
-- `←` / `→` → navigate (filmstrip scrolls carousel to follow)
-- Winner state lives in `AppState.selectedIDs` — shared between both views
-- Green checkmark + tint overlay on both carousel and grid thumbnails
+## Data And State Model Changes
 
-### Multi-Round Workflow
-```
-Round 1: Source folder (1000 photos) → cull to 200 winners
-Round 2: 200 winners become new pool → cull to 50
-Export: Copy 50 RAW files (+ JPEG sidecars) to /destination/
-```
-- Round history in sidebar (collapsible)
-- "New Round from Winners" — confirms, saves round, resets pool
+### Decision State
 
-### View Switching
-- Toolbar toggle: filmstrip icon ↔ grid icon (like Finder's view buttons)
-- `AppState.viewMode: ViewMode` (.filmstrip / .grid) persists within a session
-- Filmstrip is the default on first launch
+Replace a plain selected-ID list as the primary source of truth with explicit decision state:
 
-### Optional: Grouping
-- Toggle in toolbar: "Group by Time"
-- `GroupingService` clusters photos within N seconds of each other (default 5s, configurable)
-- In filmstrip: groups shown as section breaks in the carousel with a label ("Burst — 12 photos")
-- In grid: collapsible group headers
+- `photoDecisions: [UUID: DecisionState]`
 
-### Optional: Histogram
-- Toggle in toolbar: "Histogram"
-- In filmstrip: compact histogram chart below the large photo
-- In grid: small luminosity mini-bar beneath each thumbnail
-- Overexposure / underexposure warning markers at extremes
+Derived helpers should expose:
 
-### Export
-- `NSOpenPanel` for destination OR auto-create `Winners_[YYYYMMDD_HHMMSS]/` next to source folder
-- `CopyService`: copies files, reports progress via `AsyncStream`
-- Option: preserve original subfolder structure vs. flatten all into one folder
+- kept photos
+- rejected photos
+- undecided photos
+- kept count
 
----
+Compatibility helpers should remain during migration so existing views can still ask whether a photo is kept.
 
-## Implementation Status
+### Photo Quality Signals
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Blank app skeleton, Xcode project | ✅ Complete |
-| 1 | WelcomeView, FolderScanner, ThumbnailService, FlatGridView | ✅ Complete |
-| 2 | Winner selection, multi-round, CopyService, ExportView | ✅ Complete |
-| 3 | **FilmstripView** — large preview + carousel, K/←/→ shortcuts | ← next |
-| 4 | Optional: Time-based grouping (GroupingService, GroupedGridView) | Pending |
-| 5 | Optional: Histogram (HistogramService, chart in filmstrip + mini-bar in grid) | Pending |
-| 6 | Optional: Visual similarity (VisionService sub-clustering) | Pending |
-| 7 | Polish: recent folders, persisted sessions, configurable thresholds, app icon | Pending |
+Normalize raw technical metrics into a user-facing quality model:
 
----
+- sharpness score and label
+- exposure label
+- highlight clipping
+- shadow clipping
+- recoverability hint
 
-## Verification
-- Load 500+ mixed RAW+JPEG files → filmstrip opens immediately, carousel thumbnails load as you scroll
-- RAW+JPEG pairs show as one entry in carousel and grid (not two)
-- Press K → green checkmark appears on carousel thumbnail; navigate away and back → still marked
-- Press → rapidly through 50 photos → no lag, carousel stays in sync
-- Switch to grid view → same winners are marked there
-- Export → RAW files + JPEG sidecars land in destination folder
-- Start new round → only previous winners are in the pool; round appears in sidebar history
+This model should be cached per photo and used by the culling UI.
+
+### Moment Abstraction
+
+Time groups remain the underlying implementation, but user-facing language should shift from “groups” to “moments.” When grouping is off, a single photo should behave like a one-photo moment so navigation stays predictable.
+
+## Implementation Phases
+
+### Phase 1: Documentation
+
+- Rewrite this roadmap around fast culling and moment-based review.
+- Update README messaging after the code matches the product direction.
+
+### Phase 2: Decision Model
+
+- Introduce `DecisionState`.
+- Migrate rounds, export, and session persistence to use kept photos.
+
+### Phase 3: Moment UX
+
+- Reframe visible group language as moments.
+- Make the filmstrip navigation moment-first by default.
+
+### Phase 4: Culling Workspace
+
+- Make keep and reject explicit actions in the filmstrip.
+- Make the current decision state obvious.
+- Keep loupe, metadata, and histogram as secondary aids.
+
+### Phase 5: Quality Signal Layer
+
+- Reuse existing sharpness and histogram analysis.
+- Convert raw metrics into simple labels and hints.
+- Surface those signals inline in the culling workspace.
+
+### Phase 6: Export Alignment
+
+- Make export clearly about sending keepers to editing.
+- Preserve current copy behavior, RAW pairing, and folder options.
+
+## PR Sequence
+
+1. `docs: reframe roadmap around fast culling and moment-based review`
+2. `feat: add keep/reject/undecided decision model`
+3. `feat: add moment-centric navigation and presentation`
+4. `feat: convert filmstrip into a culling workspace`
+5. `feat: introduce objective photo quality signals`
+6. `feat: add inline decision rail for quality signals`
+7. `feat: align export flow with keeper-to-editing handoff`
+8. `docs: update README to match culling-first positioning`
+
+## Acceptance Criteria
+
+1. The user can complete a keyboard-only first pass using keep, reject, and navigation.
+2. Moment navigation is clear, responsive, and consistent whether grouping is on or off.
+3. Quality signals read as concise guidance and help answer whether a photo is viable.
+4. New rounds and export operate on kept photos only.
+5. RAW plus JPEG pairing continues to work in browsing and export flows.
+6. The product messaging in docs and UI matches the culling-first positioning.

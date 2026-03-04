@@ -23,23 +23,12 @@ struct FilmstripView: View {
                     MetadataSidePanel(photo: photo)
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 }
+
                 photoArea
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if (appState.histogramEnabled || appState.loupeEnabled), let photo = appState.currentPhoto {
-                    VStack(spacing: 0) {
-                        if appState.loupeEnabled {
-                            LoupePanelView(
-                                image: previewImage ?? thumbnailImage,
-                                center: loupeCenter,
-                                zoom: $loupeZoom,
-                                locked: loupeLocked
-                            )
-                        }
-                        if appState.histogramEnabled {
-                            HistogramSidePanel(photo: photo)
-                        }
-                    }
-                    .frame(width: 200)
+
+                if let photo = appState.currentPhoto {
+                    decisionRail(photo: photo)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -47,19 +36,24 @@ struct FilmstripView: View {
             .animation(.easeInOut(duration: 0.2), value: appState.histogramEnabled)
             .animation(.easeInOut(duration: 0.2), value: appState.loupeEnabled)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             carousel
         }
         .background(Color.black)
         .focusable()
         .focused($isFocused)
         .onAppear { isFocused = true }
-        .onKeyPress(.leftArrow)         { appState.navigateGroup(by: -1);       return .handled }
-        .onKeyPress(.rightArrow)        { appState.navigateGroup(by:  1);       return .handled }
-        .onKeyPress(.upArrow)           { appState.navigateWithinGroup(by: -1); return .handled }
-        .onKeyPress(.downArrow)         { appState.navigateWithinGroup(by:  1); return .handled }
-        .onKeyPress(KeyEquivalent("k")) { appState.toggleCurrentPhoto(); return .handled }
-        .onKeyPress(KeyEquivalent("K")) { appState.toggleCurrentPhoto(); return .handled }
-        .onKeyPress(.space)             { appState.toggleCurrentPhoto(); return .handled }
+        .onKeyPress(.leftArrow) { appState.navigateMoment(by: -1); return .handled }
+        .onKeyPress(.rightArrow) { appState.navigateMoment(by: 1); return .handled }
+        .onKeyPress(.upArrow) { appState.navigateWithinMoment(by: -1); return .handled }
+        .onKeyPress(.downArrow) { appState.navigateWithinMoment(by: 1); return .handled }
+        .onKeyPress(KeyEquivalent("k")) { appState.markCurrentPhotoKept(); return .handled }
+        .onKeyPress(KeyEquivalent("K")) { appState.markCurrentPhotoKept(); return .handled }
+        .onKeyPress(.space) { appState.markCurrentPhotoKept(); return .handled }
+        .onKeyPress(KeyEquivalent("r")) { appState.markCurrentPhotoRejected(); return .handled }
+        .onKeyPress(KeyEquivalent("R")) { appState.markCurrentPhotoRejected(); return .handled }
+        .onKeyPress(KeyEquivalent("u")) { appState.clearCurrentPhotoDecision(); return .handled }
+        .onKeyPress(KeyEquivalent("U")) { appState.clearCurrentPhotoDecision(); return .handled }
         .onKeyPress(KeyEquivalent("+")) { zoomIn(); return .handled }
         .onKeyPress(KeyEquivalent("=")) { zoomIn(); return .handled }
         .onKeyPress(KeyEquivalent("-")) { zoomOut(); return .handled }
@@ -138,6 +132,7 @@ struct FilmstripView: View {
                 guard appState.loupeEnabled else { return }
                 loupeLocked.toggle()
             }
+            .overlay(alignment: .topLeading) { cullingToolbar }
             .overlay(alignment: .bottom) { infoBar }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: appState.currentPhoto?.id) {
@@ -149,6 +144,8 @@ struct FilmstripView: View {
                 guard let photo = appState.currentPhoto else { return }
                 let currentID = photo.id
                 let currentURL = photo.thumbnailSourceURL
+
+                await appState.ensureQualitySignals(for: photo)
 
                 await ThumbnailService.shared.retainWindow(
                     currentURL: currentURL,
@@ -170,6 +167,34 @@ struct FilmstripView: View {
         }
     }
 
+    private var cullingToolbar: some View {
+        HStack(spacing: 10) {
+            Button {
+                appState.markCurrentPhotoKept()
+            } label: {
+                Label("Keep", systemImage: "checkmark.circle.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+
+            Button {
+                appState.markCurrentPhotoRejected()
+            } label: {
+                Label("Reject", systemImage: "xmark.circle.fill")
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+
+            Button("Undecided") {
+                appState.clearCurrentPhotoDecision()
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+        }
+        .padding(14)
+    }
+
     // MARK: - Info overlay
 
     private var infoBar: some View {
@@ -184,44 +209,149 @@ struct FilmstripView: View {
 
             Spacer()
 
-            if let photo = appState.currentPhoto, appState.isSelected(photo) {
-                Label("Kept", systemImage: "checkmark.circle.fill")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.green)
-                    .shadow(color: .black.opacity(0.7), radius: 4)
-                    .transition(.scale.combined(with: .opacity))
-            } else {
-                Text("K — keep")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.3))
-            }
+            decisionBadge
 
-            Text((zoomScale * magnifyBy) > 1.01 ? "\(Int((zoomScale * magnifyBy) * 100))%" : appState.filmstripInfoText)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.45))
-                .monospacedDigit()
+            Text(
+                (zoomScale * magnifyBy) > 1.01
+                    ? "\(Int((zoomScale * magnifyBy) * 100))%"
+                    : appState.filmstripInfoText
+            )
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.55))
+            .monospacedDigit()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(
             LinearGradient(
-                colors: [.clear, .black.opacity(0.6)],
-                startPoint: .top, endPoint: .bottom
+                colors: [.clear, .black.opacity(0.68)],
+                startPoint: .top,
+                endPoint: .bottom
             )
         )
+    }
+
+    @ViewBuilder
+    private var decisionBadge: some View {
+        if let photo = appState.currentPhoto {
+            switch appState.decisionState(for: photo) {
+            case .kept:
+                Label("Kept", systemImage: "checkmark.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .shadow(color: .black.opacity(0.7), radius: 4)
+            case .rejected:
+                Label("Rejected", systemImage: "xmark.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .shadow(color: .black.opacity(0.7), radius: 4)
+            case .undecided:
+                Text("K keep · R reject · U undecided")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        } else {
+            Text("K keep · R reject")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.3))
+        }
+    }
+
+    // MARK: - Decision rail
+
+    @ViewBuilder
+    private func decisionRail(photo: Photo) -> some View {
+        VStack(spacing: 0) {
+            decisionSummary(photo: photo)
+
+            if appState.loupeEnabled {
+                LoupePanelView(
+                    image: previewImage ?? thumbnailImage,
+                    center: loupeCenter,
+                    zoom: $loupeZoom,
+                    locked: loupeLocked
+                )
+            }
+
+            if appState.histogramEnabled {
+                HistogramSidePanel(photo: photo)
+            }
+        }
+        .frame(width: 220)
+        .background(Color(white: 0.06))
+    }
+
+    private func decisionSummary(photo: Photo) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Culling")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.45))
+
+            Text(appState.filmstripInfoText)
+                .font(.headline)
+                .foregroundStyle(.white.opacity(0.92))
+
+            Text(decisionSummaryText(for: photo))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(decisionColor(for: photo))
+
+            if let signals = appState.qualitySignals(for: photo) {
+                ForEach(signals.badges, id: \.self) { badge in
+                    Text(badge)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                }
+            } else {
+                Text("Analyzing photo truth…")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+        .padding(14)
+    }
+
+    private func decisionSummaryText(for photo: Photo) -> String {
+        switch appState.decisionState(for: photo) {
+        case .kept:
+            return "Ready for editing"
+        case .rejected:
+            return "Explicitly rejected"
+        case .undecided:
+            return "Needs a keep/reject call"
+        }
+    }
+
+    private func decisionColor(for photo: Photo) -> Color {
+        switch appState.decisionState(for: photo) {
+        case .kept:
+            return .green
+        case .rejected:
+            return .red
+        case .undecided:
+            return .white.opacity(0.75)
+        }
     }
 
     // MARK: - Carousel items model
 
     private enum CarouselItem: Identifiable {
-        case photo(Int, Photo)    // (flatIndex, photo)
-        case divider(Int, String) // (groupIndex, label)
-        case clusterDivider(String, Int, Int) // (groupID, clusterIndex, total)
+        case photo(Int, Photo)
+        case divider(Int, String)
+        case clusterDivider(String, Int, Int)
 
         var id: String {
             switch self {
-            case .photo(_, let p):  return "photo-\(p.id)"
-            case .divider(let gi, _): return "divider-\(gi)"
+            case .photo(_, let p):
+                return "photo-\(p.id)"
+            case .divider(let gi, _):
+                return "divider-\(gi)"
             case .clusterDivider(let groupID, let clusterIndex, _):
                 return "cluster-\(groupID)-\(clusterIndex)"
             }
@@ -232,9 +362,10 @@ struct FilmstripView: View {
         guard appState.groupingEnabled, !appState.groups.isEmpty else {
             return photos.enumerated().map { .photo($0.offset, $0.element) }
         }
+
         var items: [CarouselItem] = []
         for (gi, group) in appState.groups.enumerated() {
-            items.append(.divider(gi, group.label))
+            items.append(.divider(gi, group.momentTitle))
             if appState.similarityEnabled,
                let clusters = group.clusters,
                clusters.count > 1 {
@@ -264,12 +395,15 @@ struct FilmstripView: View {
             CarouselCell(
                 photo: photo,
                 isActive: photo.id == appState.currentPhoto?.id,
-                isSelected: appState.isSelected(photo),
-                sharpnessScore: appState.sharpnessScores[photo.id]
+                decisionState: appState.decisionState(for: photo),
+                qualitySignals: appState.qualitySignals(for: photo)
             )
             .id(photo.id)
             .onTapGesture {
                 appState.currentPhotoIndex = idx
+            }
+            .task(id: photo.id) {
+                await appState.ensureQualitySignals(for: photo)
             }
         case .divider(let gi, let label):
             CarouselGroupDivider(label: label, isActive: appState.currentGroupIndex == gi)
@@ -371,8 +505,6 @@ struct FilmstripView: View {
 private func clamp(_ value: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
     min(max(value, range.lowerBound), range.upperBound)
 }
-
-// MARK: - Carousel group divider
 
 private struct CarouselGroupDivider: View {
     let label: String

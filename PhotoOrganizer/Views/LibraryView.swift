@@ -38,7 +38,7 @@ struct LibraryView: View {
                 appState.startNewRound()
             }
         } message: {
-            Text("Your \(appState.selectionCount) selected photo\(appState.selectionCount == 1 ? "" : "s") will become the pool for the next round.")
+            Text("Your \(appState.keptCount) kept photo\(appState.keptCount == 1 ? "" : "s") will become the pool for the next round.")
         }
     }
 
@@ -53,8 +53,8 @@ struct LibraryView: View {
                     Text("\(appState.photos.count) photos")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if appState.hasSelection {
-                        Text("\(appState.selectionCount) selected")
+                    if appState.hasKeptPhotos {
+                        Text("\(appState.keptCount) kept")
                             .foregroundStyle(.green)
                     }
                 }
@@ -66,7 +66,7 @@ struct LibraryView: View {
                     ForEach(appState.rounds.reversed()) { round in
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Round \(round.number)").fontWeight(.medium)
-                            Text("\(round.winnerCount) of \(round.sourcePhotos.count) selected")
+                            Text("\(round.winnerCount) of \(round.sourcePhotos.count) kept")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 2)
@@ -138,11 +138,11 @@ struct LibraryView: View {
         // Winners-only (grid only)
         ToolbarItem {
             Toggle(isOn: $showWinnersOnly) {
-                Label("Winners Only", systemImage: showWinnersOnly ? "star.fill" : "star")
+                Label("Keepers Only", systemImage: showWinnersOnly ? "star.fill" : "star")
             }
             .toggleStyle(.button)
-            .disabled(!appState.hasSelection || appState.viewMode == .filmstrip)
-            .help("Show selected photos only")
+            .disabled(!appState.hasKeptPhotos || appState.viewMode == .filmstrip)
+            .help("Show kept photos only")
         }
 
         ToolbarItemGroup {
@@ -193,7 +193,7 @@ struct LibraryView: View {
             }
             .toggleStyle(.button)
             .disabled(appState.photos.isEmpty)
-            .help("Group burst shots by capture time")
+            .help("Group shots into moments by capture time")
         }
 
         // Visual Similarity (requires grouping)
@@ -209,7 +209,7 @@ struct LibraryView: View {
             }
             .toggleStyle(.button)
             .disabled(!appState.groupingEnabled || appState.groups.isEmpty)
-            .help("Sub-cluster visually similar photos within each time group (may be slow)")
+            .help("Sub-cluster visually similar photos within each moment (may be slow)")
         }
 
         // New Round
@@ -217,17 +217,17 @@ struct LibraryView: View {
             Button { showNewRoundAlert = true } label: {
                 Label("New Round", systemImage: "arrow.triangle.2.circlepath")
             }
-            .disabled(!appState.hasSelection)
-            .help("Use current winners as the pool for a new round")
+            .disabled(!appState.hasKeptPhotos)
+            .help("Use current keepers as the pool for a new round")
         }
 
         // Export
         ToolbarItem {
             Button { showExport = true } label: {
-                Label("Export", systemImage: "square.and.arrow.up")
+                Label("Send to Editing", systemImage: "square.and.arrow.up")
             }
-            .disabled(!appState.hasSelection)
-            .help("Copy selected photos to a destination folder")
+            .disabled(!appState.hasKeptPhotos)
+            .help("Copy kept photos to a destination folder")
         }
 
         // Settings

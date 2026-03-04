@@ -15,7 +15,7 @@ struct ExportView: View {
     private var autoDestName: String {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd_HHmmss"
-        return "Winners_\(f.string(from: Date()))"
+        return "Keepers_\(f.string(from: Date()))"
     }
 
     private func resolvedDestination() -> URL {
@@ -27,7 +27,7 @@ struct ExportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Export Winners")
+            Text("Send Keepers To Editing")
                 .font(.title2).fontWeight(.semibold)
 
             Divider()
@@ -47,7 +47,7 @@ struct ExportView: View {
     private var setupView: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label(
-                "\(appState.selectionCount) photo\(appState.selectionCount == 1 ? "" : "s") selected",
+                "\(appState.keptCount) photo\(appState.keptCount == 1 ? "" : "s") kept",
                 systemImage: "photo.on.rectangle.angled"
             )
             .foregroundStyle(.secondary)
@@ -99,7 +99,7 @@ struct ExportView: View {
                 Spacer()
                 Button("Export") { startExport() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(appState.selectedPhotos.isEmpty)
+                    .disabled(appState.keptPhotos.isEmpty)
             }
         }
     }
@@ -131,7 +131,7 @@ struct ExportView: View {
                 .foregroundStyle(.green)
 
             if let url = exportedURL {
-                Text("\(appState.selectionCount) photos copied to \"\(url.lastPathComponent)\"")
+                Text("\(appState.keptCount) keepers copied to \"\(url.lastPathComponent)\"")
                     .foregroundStyle(.secondary)
             }
 
@@ -166,7 +166,7 @@ struct ExportView: View {
         exportedURL = dest
         phase = .exporting
 
-        let photos = appState.selectedPhotos
+        let photos = appState.keptPhotos
         let root = appState.sourceURL ?? URL(fileURLWithPath: NSHomeDirectory())
         let shouldFlatten = flatten
 

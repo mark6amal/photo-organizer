@@ -36,17 +36,23 @@ struct MetadataSidePanel: View {
             let url = photo.thumbnailSourceURL
             let result = await Task.detached { EXIFService.metadata(for: url) }.value
             meta = result
+            await appState.ensureQualitySignals(for: photo)
             isLoading = false
         }
     }
 
     @ViewBuilder
     private func rows(for meta: EXIFMetadata, photo: Photo) -> some View {
+        row(label: "Decision", value: decisionLabel(for: photo))
         row(label: "Format", value: formatString(photo))
         if photo.isRAW, let jpegURL = photo.jpegPairURL {
             row(label: "Paired JPEG", value: jpegURL.lastPathComponent)
         }
-        if let score = appState.sharpnessScores[photo.id] {
+        if let signals = appState.qualitySignals(for: photo) {
+            row(label: "Sharpness", value: signals.sharpnessLabel)
+            row(label: "Exposure", value: signals.exposureLabel)
+            row(label: "Recovery", value: signals.recoverabilityHint)
+        } else if let score = appState.sharpnessScores[photo.id] {
             row(label: "Sharpness", value: sharpnessLabel(score))
         }
 
@@ -95,6 +101,17 @@ struct MetadataSidePanel: View {
             return "Medium (\(score))"
         default:
             return "High (\(score))"
+        }
+    }
+
+    private func decisionLabel(for photo: Photo) -> String {
+        switch appState.decisionState(for: photo) {
+        case .kept:
+            return "Kept"
+        case .rejected:
+            return "Rejected"
+        case .undecided:
+            return "Undecided"
         }
     }
 }
