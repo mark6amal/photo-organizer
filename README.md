@@ -56,6 +56,30 @@ xcodebuild \
   build
 ```
 
+## Package A Shareable DMG
+
+To create a release build and wrap it in a DMG:
+
+```bash
+./make-dmg.sh
+```
+
+This writes the app bundle into `.build/`, creates a staging folder in `dist/`, and produces:
+
+`dist/PhotoOrganizer.dmg`
+
+You can also include a version suffix in the filename:
+
+```bash
+./make-dmg.sh v0.1.0
+```
+
+That produces:
+
+`dist/PhotoOrganizer-macOS-v0.1.0.dmg`
+
+Upload the generated DMG as a GitHub Release asset rather than committing it to the repository.
+
 ## First Run
 
 1. Launch the app.
@@ -71,6 +95,7 @@ xcodebuild \
 - `PhotoOrganizer.xcodeproj/`: Xcode project
 - `TestPhotos/`: sample images for local testing
 - `build.sh`: convenience script for build + launch
+- `make-dmg.sh`: convenience script for release DMG packaging
 
 ## Notes
 
