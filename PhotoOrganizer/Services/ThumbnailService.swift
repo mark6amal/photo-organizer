@@ -3,6 +3,8 @@ import ImageIO
 import AppKit
 import CoreImage
 
+extension NSImage: @retroactive @unchecked Sendable {}
+
 actor ThumbnailService {
     static let shared = ThumbnailService()
 

@@ -2,7 +2,7 @@ import Foundation
 
 enum FolderScanner {
     static func scan(url: URL) async throws -> [Photo] {
-        try await Task.detached(priority: .userInitiated) {
+        await Task.detached(priority: .userInitiated) {
             let fm = FileManager.default
             let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey]
 
@@ -15,7 +15,8 @@ enum FolderScanner {
             // Group files by base path (without extension), lowercased for case-insensitivity
             var buckets: [String: [URL]] = [:]
 
-            for case let fileURL as URL in enumerator {
+            while let nextObject = enumerator.nextObject() {
+                guard let fileURL = nextObject as? URL else { continue }
                 let ext = fileURL.pathExtension.lowercased()
                 guard rawExtensions.contains(ext) || jpegExtensions.contains(ext) else { continue }
                 guard (try? fileURL.resourceValues(forKeys: resourceKeys))?.isRegularFile == true else { continue }

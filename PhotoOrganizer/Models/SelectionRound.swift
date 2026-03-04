@@ -40,9 +40,13 @@ struct SelectionRound: Identifiable, Codable {
         id = try container.decode(UUID.self, forKey: .id)
         number = try container.decode(Int.self, forKey: .number)
         sourcePhotos = try container.decode([Photo].self, forKey: .sourcePhotos)
-        keptIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .keptIDs)
-            ?? try container.decodeIfPresent(Set<UUID>.self, forKey: .selectedIDs)
-            ?? []
+        if let decodedKeptIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .keptIDs) {
+            keptIDs = decodedKeptIDs
+        } else if let legacySelectedIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .selectedIDs) {
+            keptIDs = legacySelectedIDs
+        } else {
+            keptIDs = []
+        }
         date = try container.decode(Date.self, forKey: .date)
     }
 
