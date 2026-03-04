@@ -49,10 +49,14 @@ struct MetadataSidePanel: View {
             row(label: "Paired JPEG", value: jpegURL.lastPathComponent)
         }
         if let signals = appState.qualitySignals(for: photo) {
+            if let focusScore = signals.focusScore {
+                row(label: "Focus Score", value: "\(focusScore)/100")
+            }
             row(label: "Sharpness", value: signals.sharpnessLabel)
             row(label: "Exposure", value: signals.exposureLabel)
             row(label: "Recovery", value: signals.recoverabilityHint)
         } else if let score = appState.sharpnessScores[photo.id] {
+            row(label: "Focus Score", value: focusScore(score))
             row(label: "Sharpness", value: sharpnessLabel(score))
         }
 
@@ -102,6 +106,12 @@ struct MetadataSidePanel: View {
         default:
             return "High (\(score))"
         }
+    }
+
+    private func focusScore(_ sharpness: Float) -> String {
+        let capped = min(max(sharpness, 0), 0.12)
+        let normalized = log1p(Double(capped * 100)) / log1p(12)
+        return "\(Int((normalized * 100).rounded()))/100"
     }
 
     private func decisionLabel(for photo: Photo) -> String {

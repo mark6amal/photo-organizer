@@ -8,6 +8,7 @@ enum DecisionState: String, Codable, Sendable {
 
 struct PhotoQualitySignals: Sendable {
     let sharpnessScore: Float?
+    let focusScore: Int?
     let sharpnessLabel: String
     let exposureLabel: String
     let hasHighlightClipping: Bool
@@ -413,6 +414,7 @@ final class AppState {
                     if let existing = qualitySignalsByPhotoID[photo.id] {
                         qualitySignalsByPhotoID[photo.id] = PhotoQualitySignals(
                             sharpnessScore: score,
+                            focusScore: Self.focusScore(for: score),
                             sharpnessLabel: Self.sharpnessLabel(for: score),
                             exposureLabel: existing.exposureLabel,
                             hasHighlightClipping: existing.hasHighlightClipping,
@@ -457,6 +459,7 @@ final class AppState {
             if existing.isNearDuplicate != isNearDuplicate {
                 qualitySignalsByPhotoID[photo.id] = PhotoQualitySignals(
                     sharpnessScore: existing.sharpnessScore,
+                    focusScore: existing.focusScore,
                     sharpnessLabel: existing.sharpnessLabel,
                     exposureLabel: existing.exposureLabel,
                     hasHighlightClipping: existing.hasHighlightClipping,
@@ -501,6 +504,7 @@ final class AppState {
             guard signals.isNearDuplicate else { continue }
             qualitySignalsByPhotoID[id] = PhotoQualitySignals(
                 sharpnessScore: signals.sharpnessScore,
+                focusScore: signals.focusScore,
                 sharpnessLabel: signals.sharpnessLabel,
                 exposureLabel: signals.exposureLabel,
                 hasHighlightClipping: signals.hasHighlightClipping,
@@ -518,6 +522,7 @@ final class AppState {
             guard signals.isNearDuplicate != isNearDuplicate else { continue }
             qualitySignalsByPhotoID[id] = PhotoQualitySignals(
                 sharpnessScore: signals.sharpnessScore,
+                focusScore: signals.focusScore,
                 sharpnessLabel: signals.sharpnessLabel,
                 exposureLabel: signals.exposureLabel,
                 hasHighlightClipping: signals.hasHighlightClipping,
@@ -538,6 +543,7 @@ final class AppState {
         let histogramSummary = histogram.map { Self.histogramSummary(for: $0) } ?? HistogramSummary.neutral
         return PhotoQualitySignals(
             sharpnessScore: sharpnessScore,
+            focusScore: focusScore(for: sharpnessScore),
             sharpnessLabel: sharpnessLabel,
             exposureLabel: exposureLabel(for: histogramSummary.averageLuma),
             hasHighlightClipping: histogramSummary.highlightClip,
@@ -591,6 +597,14 @@ final class AppState {
         default:
             return "Sharp"
         }
+    }
+
+    private static func focusScore(for sharpness: Float?) -> Int? {
+        guard let sharpness else { return nil }
+
+        let capped = min(max(sharpness, 0), 0.12)
+        let normalized = log1p(Double(capped * 100)) / log1p(12)
+        return Int((normalized * 100).rounded())
     }
 
     private static func exposureLabel(for averageLuma: Float) -> String {
