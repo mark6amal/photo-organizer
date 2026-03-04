@@ -4,6 +4,22 @@ import ImageIO
 
 actor PixelSimilarityService {
     static let shared = PixelSimilarityService()
+    static func comparisonCount(for photoCount: Int, mode: AppState.SimilarityMode) -> Int {
+        guard photoCount > 1 else { return 0 }
+
+        switch mode {
+        case .fastBurst:
+            return photoCount - 1
+        case .balanced:
+            var total = 0
+            for index in 0..<photoCount {
+                total += min(3, photoCount - index - 1)
+            }
+            return total
+        case .thorough:
+            return photoCount * (photoCount - 1) / 2
+        }
+    }
 
     private var grayscaleCache: [URL: [Float]] = [:]
     private var sharpnessCache: [URL: Float] = [:]

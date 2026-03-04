@@ -54,6 +54,8 @@ final class AppState {
     var isSimilarityComputing: Bool = false
     var similarityThreshold: Float = 0.06
     var similarityMode: SimilarityMode = .balanced
+    var similarityProgressCompleted: Int = 0
+    var similarityProgressTotal: Int = 0
 
     // Histogram
     var histogramEnabled: Bool = false
@@ -75,6 +77,14 @@ final class AppState {
     var selectedPhotos: [Photo] { photos.filter { selectedIDs.contains($0.id) } }
     var hasSelection: Bool { !selectedIDs.isEmpty }
     var selectionCount: Int { selectedIDs.count }
+    var similarityProgressFraction: Double {
+        guard similarityProgressTotal > 0 else { return 0 }
+        return Double(similarityProgressCompleted) / Double(similarityProgressTotal)
+    }
+    var similarityProgressText: String {
+        guard similarityProgressTotal > 0 else { return "0 / 0 scores" }
+        return "\(similarityProgressCompleted) / \(similarityProgressTotal) scores"
+    }
 
     var currentGroupIndex: Int? {
         guard groupingEnabled, let current = currentPhoto else { return nil }
@@ -200,11 +210,40 @@ final class AppState {
         guard similarityEnabled, !groups.isEmpty else {
             for i in 0..<groups.count { groups[i].clusters = nil }
             sharpnessScores = [:]
+            similarityProgressCompleted = 0
+            similarityProgressTotal = 0
             return
         }
         isSimilarityComputing = true
         sharpnessScores = [:]
+        similarityProgressCompleted = 0
+        similarityProgressTotal = groups.reduce(into: 0) { partial, group in
+            partial += PixelSimilarityService.comparisonCount(
+                for: group.photos.count,
+                mode: similarityMode
+            )
+        }
+
+        if let sourceURL,
+           let cached = await SimilarityCacheService.shared.load(
+               folderURL: sourceURL,
+               photos: photos,
+               mode: similarityMode,
+               threshold: similarityThreshold,
+               groupGapThreshold: groupGapThreshold
+           ) {
+            applyCachedSimilarity(cached)
+            similarityProgressCompleted = similarityProgressTotal
+            isSimilarityComputing = false
+            return
+        }
+
+        var sharpnessByPath: [String: Float] = [:]
         for i in 0..<groups.count {
+            similarityProgressCompleted += PixelSimilarityService.comparisonCount(
+                for: groups[i].photos.count,
+                mode: similarityMode
+            )
             groups[i].clusters = await PixelSimilarityService.shared.cluster(
                 photos: groups[i].photos,
                 mode: similarityMode,
@@ -213,8 +252,21 @@ final class AppState {
             for photo in groups[i].photos {
                 if let score = await PixelSimilarityService.shared.sharpness(for: photo.thumbnailSourceURL) {
                     sharpnessScores[photo.id] = score
+                    sharpnessByPath[photo.thumbnailSourceURL.path] = score
                 }
             }
+        }
+
+        if let sourceURL {
+            await SimilarityCacheService.shared.save(
+                folderURL: sourceURL,
+                photos: photos,
+                mode: similarityMode,
+                threshold: similarityThreshold,
+                groupGapThreshold: groupGapThreshold,
+                groups: groups,
+                sharpnessByPath: sharpnessByPath
+            )
         }
         isSimilarityComputing = false
     }
@@ -247,6 +299,8 @@ final class AppState {
     func loadPhotos(from url: URL) async {
         isScanning = true
         scanError = nil
+        similarityProgressCompleted = 0
+        similarityProgressTotal = 0
         await ThumbnailService.shared.clearAll()
         photos = []
         selectedIDs = []
@@ -276,7 +330,29 @@ final class AppState {
         loupeEnabled = false
         metadataEnabled = false
         sharpnessScores = [:]
+        similarityProgressCompleted = 0
+        similarityProgressTotal = 0
         Task { await ThumbnailService.shared.clearAll() }
         SessionStore.clear()
+    }
+
+    private func applyCachedSimilarity(_ cached: SimilarityCacheService.CachedAnalysis) {
+        let photosByPath = Dictionary(uniqueKeysWithValues: photos.map {
+            ($0.thumbnailSourceURL.path, $0)
+        })
+
+        for i in 0..<groups.count {
+            let clusterPaths = cached.groupClustersByIndex[i] ?? [groups[i].photos.map(\.thumbnailSourceURL.path)]
+            groups[i].clusters = clusterPaths
+                .map { $0.compactMap { photosByPath[$0] } }
+                .filter { !$0.isEmpty }
+        }
+
+        sharpnessScores = [:]
+        for photo in photos {
+            if let score = cached.sharpnessByPath[photo.thumbnailSourceURL.path] {
+                sharpnessScores[photo.id] = score
+            }
+        }
     }
 }

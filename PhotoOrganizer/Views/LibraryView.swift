@@ -13,8 +13,13 @@ struct LibraryView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarView
         } detail: {
-            detailContent
-                .toolbar { toolbarItems }
+            ZStack(alignment: .top) {
+                detailContent
+                if appState.isSimilarityComputing {
+                    similarityProgressOverlay
+                }
+            }
+            .toolbar { toolbarItems }
         }
         .onChange(of: appState.photos.count) { _, newCount in
             guard appState.groupingEnabled, newCount > 0 else { return }
@@ -299,5 +304,28 @@ struct LibraryView: View {
         .formStyle(.grouped)
         .frame(width: 340)
         .fixedSize()
+    }
+
+    private var similarityProgressOverlay: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Text("Computing Similarity")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(appState.similarityProgressText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            ProgressView(value: appState.similarityProgressFraction)
+                .progressViewStyle(.linear)
+                .controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: 420)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.top, 12)
     }
 }
