@@ -21,4 +21,8 @@ struct PhotoGroup: Identifiable {
         }
         return formatter.string(from: start)
     }
+
+    var momentTitle: String {
+        "Moment \(number)"
+    }
 }

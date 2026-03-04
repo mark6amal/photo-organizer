@@ -15,10 +15,12 @@ enum SessionStore {
 
     static func save(_ state: AppState) {
         guard let url = sessionURL else { return }
+        let decisions = state.photoDecisions.map { StoredDecision(id: $0.key, state: $0.value) }
         let data = SessionData(
             sourceURL: state.sourceURL,
             photos: state.photos,
-            selectedIDs: Array(state.selectedIDs),
+            decisions: decisions,
+            legacySelectedIDs: Array(state.selectedIDs),
             rounds: state.rounds,
             viewMode: state.viewMode == .filmstrip ? "filmstrip" : "grid"
         )
@@ -40,7 +42,7 @@ enum SessionStore {
         let validIDs = Set(validPhotos.map(\.id))
         state.sourceURL = session.sourceURL
         state.photos = validPhotos
-        state.selectedIDs = Set(session.selectedIDs).intersection(validIDs)
+        state.photoDecisions = session.restoredDecisions(validIDs: validIDs)
         state.rounds = session.rounds
         state.viewMode = session.viewMode == "grid" ? .grid : .filmstrip
         state.currentPhotoIndex = 0
@@ -52,12 +54,77 @@ enum SessionStore {
     }
 }
 
+private struct StoredDecision: Codable {
+    let id: UUID
+    let state: DecisionState
+}
+
 private struct SessionData: Codable {
     let sourceURL: URL?
     let photos: [Photo]
-    let selectedIDs: [UUID]
+    let decisions: [StoredDecision]
+    let legacySelectedIDs: [UUID]
     let rounds: [SelectionRound]
     let viewMode: String
+
+    init(
+        sourceURL: URL?,
+        photos: [Photo],
+        decisions: [StoredDecision],
+        legacySelectedIDs: [UUID],
+        rounds: [SelectionRound],
+        viewMode: String
+    ) {
+        self.sourceURL = sourceURL
+        self.photos = photos
+        self.decisions = decisions
+        self.legacySelectedIDs = legacySelectedIDs
+        self.rounds = rounds
+        self.viewMode = viewMode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceURL
+        case photos
+        case decisions
+        case legacySelectedIDs = "selectedIDs"
+        case rounds
+        case viewMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
+        photos = try container.decode([Photo].self, forKey: .photos)
+        decisions = try container.decodeIfPresent([StoredDecision].self, forKey: .decisions) ?? []
+        legacySelectedIDs = try container.decodeIfPresent([UUID].self, forKey: .legacySelectedIDs) ?? []
+        rounds = try container.decodeIfPresent([SelectionRound].self, forKey: .rounds) ?? []
+        viewMode = try container.decodeIfPresent(String.self, forKey: .viewMode) ?? "filmstrip"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try container.encode(photos, forKey: .photos)
+        try container.encode(decisions, forKey: .decisions)
+        try container.encode(legacySelectedIDs, forKey: .legacySelectedIDs)
+        try container.encode(rounds, forKey: .rounds)
+        try container.encode(viewMode, forKey: .viewMode)
+    }
+
+    func restoredDecisions(validIDs: Set<UUID>) -> [UUID: DecisionState] {
+        if !decisions.isEmpty {
+            return decisions.reduce(into: [UUID: DecisionState]()) { partial, entry in
+                guard validIDs.contains(entry.id) else { return }
+                partial[entry.id] = entry.state
+            }
+        }
+
+        return legacySelectedIDs.reduce(into: [UUID: DecisionState]()) { partial, id in
+            guard validIDs.contains(id) else { return }
+            partial[id] = .kept
+        }
+    }
 }
 
 // MARK: - Recent Folders

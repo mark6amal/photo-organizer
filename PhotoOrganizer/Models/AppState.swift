@@ -1,5 +1,30 @@
 import Foundation
 
+enum DecisionState: String, Codable, Sendable {
+    case undecided
+    case kept
+    case rejected
+}
+
+struct PhotoQualitySignals: Sendable {
+    let sharpnessScore: Float?
+    let sharpnessLabel: String
+    let exposureLabel: String
+    let hasHighlightClipping: Bool
+    let hasShadowClipping: Bool
+    let recoverabilityHint: String
+    let isNearDuplicate: Bool
+
+    var badges: [String] {
+        var values = [sharpnessLabel, exposureLabel]
+        if hasHighlightClipping { values.append("Highlights clipped") }
+        if hasShadowClipping { values.append("Shadows crushed") }
+        if isNearDuplicate { values.append("Likely duplicate") }
+        values.append(recoverabilityHint)
+        return values
+    }
+}
+
 @MainActor
 @Observable
 final class AppState {
@@ -27,7 +52,7 @@ final class AppState {
             case .balanced:
                 return "Compare within a small local window. Good default."
             case .thorough:
-                return "Compare all pairs inside each time group. Slowest."
+                return "Compare all pairs inside each moment. Slowest."
             }
         }
     }
@@ -36,7 +61,7 @@ final class AppState {
 
     var sourceURL: URL?
     var photos: [Photo] = []
-    var selectedIDs: Set<UUID> = []
+    var photoDecisions: [UUID: DecisionState] = [:]
     var rounds: [SelectionRound] = []
     var isScanning = false
     var scanError: String?
@@ -66,21 +91,54 @@ final class AppState {
     // Metadata panel
     var metadataEnabled: Bool = false
 
-    // Similarity metrics
+    // Analysis
     var sharpnessScores: [UUID: Float] = [:]
+    var qualitySignalsByPhotoID: [UUID: PhotoQualitySignals] = [:]
+
+    // MARK: - Compatibility
+
+    var selectedIDs: Set<UUID> {
+        get {
+            Set(
+                photoDecisions.compactMap { entry in
+                    entry.value == .kept ? entry.key : nil
+                }
+            )
+        }
+        set {
+            let validIDs = Set(photos.map(\.id))
+            for id in validIDs {
+                if newValue.contains(id) {
+                    photoDecisions[id] = .kept
+                } else if photoDecisions[id] == .kept {
+                    photoDecisions.removeValue(forKey: id)
+                }
+            }
+        }
+    }
 
     // MARK: - Derived
 
     var currentPhoto: Photo? {
         photos.indices.contains(currentPhotoIndex) ? photos[currentPhotoIndex] : nil
     }
-    var selectedPhotos: [Photo] { photos.filter { selectedIDs.contains($0.id) } }
-    var hasSelection: Bool { !selectedIDs.isEmpty }
-    var selectionCount: Int { selectedIDs.count }
+
+    var keptPhotoIDs: Set<UUID> { selectedIDs }
+    var keptPhotos: [Photo] { photos.filter { isKept($0) } }
+    var rejectedPhotos: [Photo] { photos.filter { isRejected($0) } }
+    var undecidedPhotos: [Photo] { photos.filter { decisionState(for: $0) == .undecided } }
+
+    var selectedPhotos: [Photo] { keptPhotos }
+    var hasKeptPhotos: Bool { !keptPhotoIDs.isEmpty }
+    var hasSelection: Bool { hasKeptPhotos }
+    var keptCount: Int { keptPhotoIDs.count }
+    var selectionCount: Int { keptCount }
+
     var similarityProgressFraction: Double {
         guard similarityProgressTotal > 0 else { return 0 }
         return Double(similarityProgressCompleted) / Double(similarityProgressTotal)
     }
+
     var similarityProgressText: String {
         guard similarityProgressTotal > 0 else { return "0 / 0 scores" }
         return "\(similarityProgressCompleted) / \(similarityProgressTotal) scores"
@@ -91,14 +149,56 @@ final class AppState {
         return groups.firstIndex { $0.photos.contains { $0.id == current.id } }
     }
 
+    var currentMomentIndex: Int? {
+        if groupingEnabled {
+            return currentGroupIndex
+        }
+        return currentPhoto == nil ? nil : currentPhotoIndex
+    }
+
+    var momentCount: Int {
+        if groupingEnabled, !groups.isEmpty {
+            return groups.count
+        }
+        return photos.count
+    }
+
     var currentPhotoIndexInGroup: Int? {
         guard let gi = currentGroupIndex, let current = currentPhoto else { return nil }
         return groups[gi].photos.firstIndex { $0.id == current.id }.map { $0 + 1 }
     }
 
+    var currentPhotoIndexInMoment: Int? {
+        if groupingEnabled {
+            return currentPhotoIndexInGroup
+        }
+        return currentPhoto == nil ? nil : 1
+    }
+
     var currentGroupPhotoCount: Int? {
         guard let gi = currentGroupIndex else { return nil }
         return groups[gi].photos.count
+    }
+
+    var currentMomentPhotoCount: Int? {
+        if groupingEnabled {
+            return currentGroupPhotoCount
+        }
+        return currentPhoto == nil ? nil : 1
+    }
+
+    var currentMoment: PhotoGroup? {
+        if groupingEnabled, let gi = currentGroupIndex {
+            return groups[gi]
+        }
+        guard let current = currentPhoto else { return nil }
+        return PhotoGroup(
+            id: current.id,
+            number: currentPhotoIndex + 1,
+            photos: [current],
+            startDate: nil,
+            endDate: nil
+        )
     }
 
     private var visualClusterSequence: [[Photo]] {
@@ -113,34 +213,78 @@ final class AppState {
     }
 
     var filmstripInfoText: String {
-        if groupingEnabled,
-           let gi = currentGroupIndex,
-           let pos = currentPhotoIndexInGroup,
-           let total = currentGroupPhotoCount {
-            return "Group \(gi + 1) of \(groups.count) · Photo \(pos)/\(total)"
+        guard let momentIndex = currentMomentIndex else {
+            return "No moment"
         }
-        return "\(currentPhotoIndex + 1) / \(photos.count)"
+
+        if let pos = currentPhotoIndexInMoment,
+           let total = currentMomentPhotoCount,
+           total > 1 {
+            return "Moment \(momentIndex + 1) of \(momentCount) · Photo \(pos)/\(total)"
+        }
+        return "Moment \(momentIndex + 1) of \(momentCount)"
     }
 
-    func isSelected(_ photo: Photo) -> Bool { selectedIDs.contains(photo.id) }
+    // MARK: - Decisions
+
+    func decisionState(for photo: Photo) -> DecisionState {
+        photoDecisions[photo.id] ?? .undecided
+    }
+
+    func isKept(_ photo: Photo) -> Bool {
+        decisionState(for: photo) == .kept
+    }
+
+    func isRejected(_ photo: Photo) -> Bool {
+        decisionState(for: photo) == .rejected
+    }
+
+    func isSelected(_ photo: Photo) -> Bool {
+        isKept(photo)
+    }
 
     func selectedInGroup(_ group: PhotoGroup) -> Int {
-        group.photos.filter { selectedIDs.contains($0.id) }.count
+        group.photos.filter { isKept($0) }.count
     }
 
-    // MARK: - Selection
+    func setDecision(_ state: DecisionState, for photo: Photo) {
+        if state == .undecided {
+            photoDecisions.removeValue(forKey: photo.id)
+        } else {
+            photoDecisions[photo.id] = state
+        }
+    }
+
+    func clearDecision(for photo: Photo) {
+        photoDecisions.removeValue(forKey: photo.id)
+    }
 
     func toggleSelected(_ photo: Photo) {
-        if selectedIDs.contains(photo.id) {
-            selectedIDs.remove(photo.id)
+        if isKept(photo) {
+            clearDecision(for: photo)
         } else {
-            selectedIDs.insert(photo.id)
+            setDecision(.kept, for: photo)
         }
     }
 
     func toggleCurrentPhoto() {
         guard let photo = currentPhoto else { return }
         toggleSelected(photo)
+    }
+
+    func markCurrentPhotoKept() {
+        guard let photo = currentPhoto else { return }
+        setDecision(.kept, for: photo)
+    }
+
+    func markCurrentPhotoRejected() {
+        guard let photo = currentPhoto else { return }
+        setDecision(.rejected, for: photo)
+    }
+
+    func clearCurrentPhotoDecision() {
+        guard let photo = currentPhoto else { return }
+        clearDecision(for: photo)
     }
 
     // MARK: - Navigation
@@ -150,7 +294,7 @@ final class AppState {
         currentPhotoIndex = max(0, min(photos.count - 1, currentPhotoIndex + delta))
     }
 
-    func navigateGroup(by delta: Int) {
+    func navigateMoment(by delta: Int) {
         guard !photos.isEmpty else { return }
         if let current = currentPhoto,
            let clusterIndex = visualClusterSequence.firstIndex(where: { cluster in
@@ -176,6 +320,10 @@ final class AppState {
         }
     }
 
+    func navigateGroup(by delta: Int) {
+        navigateMoment(by: delta)
+    }
+
     func navigateWithinGroup(by delta: Int) {
         guard !photos.isEmpty else { return }
         guard groupingEnabled, let gi = currentGroupIndex, let current = currentPhoto else {
@@ -191,17 +339,26 @@ final class AppState {
         }
     }
 
+    func navigateWithinMoment(by delta: Int) {
+        navigateWithinGroup(by: delta)
+    }
+
     // MARK: - Grouping
 
     func computeGroups() async {
         guard groupingEnabled, !photos.isEmpty else {
             groups = []
+            clearDuplicateFlags()
             return
         }
         isGrouping = true
         groups = await GroupingService.group(photos: photos, gapThreshold: groupGapThreshold)
         isGrouping = false
-        if similarityEnabled { await computeSimilarity() }
+        if similarityEnabled {
+            await computeSimilarity()
+        } else {
+            refreshDuplicateFlags()
+        }
     }
 
     // MARK: - Visual Similarity
@@ -209,13 +366,12 @@ final class AppState {
     func computeSimilarity() async {
         guard similarityEnabled, !groups.isEmpty else {
             for i in 0..<groups.count { groups[i].clusters = nil }
-            sharpnessScores = [:]
+            clearDuplicateFlags()
             similarityProgressCompleted = 0
             similarityProgressTotal = 0
             return
         }
         isSimilarityComputing = true
-        sharpnessScores = [:]
         similarityProgressCompleted = 0
         similarityProgressTotal = groups.reduce(into: 0) { partial, group in
             partial += PixelSimilarityService.comparisonCount(
@@ -253,6 +409,18 @@ final class AppState {
                 if let score = await PixelSimilarityService.shared.sharpness(for: photo.thumbnailSourceURL) {
                     sharpnessScores[photo.id] = score
                     sharpnessByPath[photo.thumbnailSourceURL.path] = score
+
+                    if let existing = qualitySignalsByPhotoID[photo.id] {
+                        qualitySignalsByPhotoID[photo.id] = PhotoQualitySignals(
+                            sharpnessScore: score,
+                            sharpnessLabel: Self.sharpnessLabel(for: score),
+                            exposureLabel: existing.exposureLabel,
+                            hasHighlightClipping: existing.hasHighlightClipping,
+                            hasShadowClipping: existing.hasShadowClipping,
+                            recoverabilityHint: existing.recoverabilityHint,
+                            isNearDuplicate: existing.isNearDuplicate
+                        )
+                    }
                 }
             }
         }
@@ -268,6 +436,7 @@ final class AppState {
                 sharpnessByPath: sharpnessByPath
             )
         }
+        refreshDuplicateFlags()
         isSimilarityComputing = false
     }
 
@@ -276,21 +445,212 @@ final class AppState {
         groups[i].isCollapsed.toggle()
     }
 
+    // MARK: - Quality Signals
+
+    func qualitySignals(for photo: Photo) -> PhotoQualitySignals? {
+        qualitySignalsByPhotoID[photo.id]
+    }
+
+    func ensureQualitySignals(for photo: Photo) async {
+        let isNearDuplicate = duplicateClusterSize(for: photo) > 1
+        if let existing = qualitySignalsByPhotoID[photo.id] {
+            if existing.isNearDuplicate != isNearDuplicate {
+                qualitySignalsByPhotoID[photo.id] = PhotoQualitySignals(
+                    sharpnessScore: existing.sharpnessScore,
+                    sharpnessLabel: existing.sharpnessLabel,
+                    exposureLabel: existing.exposureLabel,
+                    hasHighlightClipping: existing.hasHighlightClipping,
+                    hasShadowClipping: existing.hasShadowClipping,
+                    recoverabilityHint: existing.recoverabilityHint,
+                    isNearDuplicate: isNearDuplicate
+                )
+            }
+            return
+        }
+
+        async let sharpnessTask = PixelSimilarityService.shared.sharpness(for: photo.thumbnailSourceURL)
+        async let histogramTask = HistogramService.shared.histogram(for: photo.thumbnailSourceURL)
+        let sharpness = await sharpnessTask
+        let histogram = await histogramTask
+
+        if let sharpness {
+            sharpnessScores[photo.id] = sharpness
+        }
+
+        qualitySignalsByPhotoID[photo.id] = Self.buildQualitySignals(
+            for: photo,
+            sharpnessScore: sharpness,
+            histogram: histogram,
+            isNearDuplicate: isNearDuplicate
+        )
+    }
+
+    private func duplicateClusterSize(for photo: Photo) -> Int {
+        guard groupingEnabled, similarityEnabled else { return 0 }
+        for group in groups {
+            guard let clusters = group.clusters else { continue }
+            for cluster in clusters where cluster.contains(where: { $0.id == photo.id }) {
+                return cluster.count
+            }
+        }
+        return 0
+    }
+
+    private func clearDuplicateFlags() {
+        for (id, signals) in qualitySignalsByPhotoID {
+            guard signals.isNearDuplicate else { continue }
+            qualitySignalsByPhotoID[id] = PhotoQualitySignals(
+                sharpnessScore: signals.sharpnessScore,
+                sharpnessLabel: signals.sharpnessLabel,
+                exposureLabel: signals.exposureLabel,
+                hasHighlightClipping: signals.hasHighlightClipping,
+                hasShadowClipping: signals.hasShadowClipping,
+                recoverabilityHint: signals.recoverabilityHint,
+                isNearDuplicate: false
+            )
+        }
+    }
+
+    private func refreshDuplicateFlags() {
+        for (id, signals) in qualitySignalsByPhotoID {
+            guard let photo = photos.first(where: { $0.id == id }) else { continue }
+            let isNearDuplicate = duplicateClusterSize(for: photo) > 1
+            guard signals.isNearDuplicate != isNearDuplicate else { continue }
+            qualitySignalsByPhotoID[id] = PhotoQualitySignals(
+                sharpnessScore: signals.sharpnessScore,
+                sharpnessLabel: signals.sharpnessLabel,
+                exposureLabel: signals.exposureLabel,
+                hasHighlightClipping: signals.hasHighlightClipping,
+                hasShadowClipping: signals.hasShadowClipping,
+                recoverabilityHint: signals.recoverabilityHint,
+                isNearDuplicate: isNearDuplicate
+            )
+        }
+    }
+
+    private static func buildQualitySignals(
+        for photo: Photo,
+        sharpnessScore: Float?,
+        histogram: HistogramData?,
+        isNearDuplicate: Bool
+    ) -> PhotoQualitySignals {
+        let sharpnessLabel = sharpnessLabel(for: sharpnessScore)
+        let histogramSummary = histogram.map { Self.histogramSummary(for: $0) } ?? HistogramSummary.neutral
+        return PhotoQualitySignals(
+            sharpnessScore: sharpnessScore,
+            sharpnessLabel: sharpnessLabel,
+            exposureLabel: exposureLabel(for: histogramSummary.averageLuma),
+            hasHighlightClipping: histogramSummary.highlightClip,
+            hasShadowClipping: histogramSummary.shadowClip,
+            recoverabilityHint: recoverabilityHint(
+                isRAW: photo.isRAW,
+                highlightClip: histogramSummary.highlightClip,
+                shadowClip: histogramSummary.shadowClip,
+                averageLuma: histogramSummary.averageLuma
+            ),
+            isNearDuplicate: isNearDuplicate
+        )
+    }
+
+    private struct HistogramSummary {
+        let averageLuma: Float
+        let highlightClip: Bool
+        let shadowClip: Bool
+
+        static let neutral = HistogramSummary(
+            averageLuma: 0.5,
+            highlightClip: false,
+            shadowClip: false
+        )
+    }
+
+    private static func histogramSummary(for histogram: HistogramData) -> HistogramSummary {
+        let values = histogram.luma
+        let total = max(values.reduce(Float.zero, +), 0.0001)
+        let weighted = values.enumerated().reduce(Float.zero) { partial, entry in
+            let normalizedIndex = Float(entry.offset) / Float(max(values.count - 1, 1))
+            return partial + (normalizedIndex * entry.element)
+        } / total
+
+        let shadowEnergy = values.prefix(4).reduce(Float.zero, +)
+        let highlightEnergy = values.suffix(4).reduce(Float.zero, +)
+        return HistogramSummary(
+            averageLuma: weighted,
+            highlightClip: highlightEnergy > 1.15,
+            shadowClip: shadowEnergy > 1.15
+        )
+    }
+
+    private static func sharpnessLabel(for score: Float?) -> String {
+        guard let score else { return "Sharpness unknown" }
+        switch score {
+        case ..<0.02:
+            return "Soft"
+        case ..<0.06:
+            return "Borderline"
+        default:
+            return "Sharp"
+        }
+    }
+
+    private static func exposureLabel(for averageLuma: Float) -> String {
+        switch averageLuma {
+        case ..<0.18:
+            return "Heavily underexposed"
+        case ..<0.36:
+            return "Slightly dark"
+        case ..<0.68:
+            return "Balanced"
+        case ..<0.82:
+            return "Slightly bright"
+        default:
+            return "Heavily overexposed"
+        }
+    }
+
+    private static func recoverabilityHint(
+        isRAW: Bool,
+        highlightClip: Bool,
+        shadowClip: Bool,
+        averageLuma: Float
+    ) -> String {
+        if isRAW {
+            if highlightClip || shadowClip {
+                return "Likely recoverable"
+            }
+            if averageLuma < 0.18 || averageLuma > 0.82 {
+                return "Moderate recovery room"
+            }
+            return "Healthy editing headroom"
+        }
+
+        if highlightClip && shadowClip {
+            return "Limited recovery"
+        }
+        if highlightClip || shadowClip {
+            return "Some recovery possible"
+        }
+        return "Good JPEG latitude"
+    }
+
     // MARK: - Rounds
 
     func startNewRound() {
-        guard hasSelection else { return }
+        guard hasKeptPhotos else { return }
         let round = SelectionRound(
             id: UUID(),
             number: rounds.count + 1,
             sourcePhotos: photos,
-            selectedIDs: selectedIDs,
+            keptIDs: keptPhotoIDs,
             date: Date()
         )
         rounds.append(round)
         photos = round.winners
-        selectedIDs = []
+        photoDecisions = [:]
         currentPhotoIndex = 0
+        groups = []
+        qualitySignalsByPhotoID = [:]
+        sharpnessScores = [:]
         SessionStore.save(self)
     }
 
@@ -302,15 +662,21 @@ final class AppState {
         similarityProgressCompleted = 0
         similarityProgressTotal = 0
         await ThumbnailService.shared.clearAll()
+        await HistogramService.shared.clearCache()
+        await PixelSimilarityService.shared.clearCache()
         photos = []
-        selectedIDs = []
+        photoDecisions = [:]
         currentPhotoIndex = 0
+        groups = []
+        sharpnessScores = [:]
+        qualitySignalsByPhotoID = [:]
         do {
             photos = try await FolderScanner.scan(url: url)
         } catch {
             scanError = error.localizedDescription
         }
         isScanning = false
+        sourceURL = url
         RecentFolders.add(url)
         SessionStore.save(self)
     }
@@ -318,7 +684,7 @@ final class AppState {
     func reset() {
         sourceURL = nil
         photos = []
-        selectedIDs = []
+        photoDecisions = [:]
         rounds = []
         scanError = nil
         isScanning = false
@@ -330,9 +696,14 @@ final class AppState {
         loupeEnabled = false
         metadataEnabled = false
         sharpnessScores = [:]
+        qualitySignalsByPhotoID = [:]
         similarityProgressCompleted = 0
         similarityProgressTotal = 0
-        Task { await ThumbnailService.shared.clearAll() }
+        Task {
+            await ThumbnailService.shared.clearAll()
+            await HistogramService.shared.clearCache()
+            await PixelSimilarityService.shared.clearCache()
+        }
         SessionStore.clear()
     }
 
@@ -348,7 +719,6 @@ final class AppState {
                 .filter { !$0.isEmpty }
         }
 
-        sharpnessScores = [:]
         for photo in photos {
             if let score = cached.sharpnessByPath[photo.thumbnailSourceURL.path] {
                 sharpnessScores[photo.id] = score

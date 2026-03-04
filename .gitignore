@@ -10,10 +10,12 @@ xcuserdata/
 
 # Swift Package Manager / Xcode build output
 .build/
+dist/
 DerivedData/
 build/
 *.build/
 *.app
+*.dmg
 *.dSYM
 *.dSYM.zip
 *.xcarchive

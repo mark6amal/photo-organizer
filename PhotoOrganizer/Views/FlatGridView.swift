@@ -9,7 +9,7 @@ struct FlatGridView: View {
     @FocusState private var isGridFocused: Bool
 
     private var displayedPhotos: [Photo] {
-        showWinnersOnly ? appState.selectedPhotos : appState.photos
+        showWinnersOnly ? appState.keptPhotos : appState.photos
     }
 
     var body: some View {
@@ -22,14 +22,18 @@ struct FlatGridView: View {
                     ThumbnailCell(
                         photo: photo,
                         size: thumbnailSize,
-                        isSelected: appState.isSelected(photo),
+                        decisionState: appState.decisionState(for: photo),
                         isFocused: focusedID == photo.id,
-                        showHistogram: appState.histogramEnabled
+                        showHistogram: appState.histogramEnabled,
+                        qualitySignals: appState.qualitySignals(for: photo)
                     )
                     .onTapGesture {
                         focusedID = photo.id
                         isGridFocused = true
                         appState.toggleSelected(photo)
+                    }
+                    .task(id: photo.id) {
+                        await appState.ensureQualitySignals(for: photo)
                     }
                 }
             }
@@ -69,8 +73,8 @@ struct FlatGridView: View {
 
     private var statusBar: some View {
         HStack(spacing: 12) {
-            if appState.hasSelection {
-                Text("\(appState.selectionCount) of \(appState.photos.count) selected")
+            if appState.hasKeptPhotos {
+                Text("\(appState.keptCount) of \(appState.photos.count) kept")
                     .font(.caption)
                     .foregroundStyle(.primary)
             } else {
