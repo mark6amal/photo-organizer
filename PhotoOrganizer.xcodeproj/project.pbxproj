@@ -36,6 +36,7 @@
 		CCCC0018 /* LoupePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBB001B /* LoupePanelView.swift */; };
 		CCCC0019 /* PixelSimilarityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBB001C /* PixelSimilarityService.swift */; };
 		CCCC0020 /* SimilarityCacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBB001D /* SimilarityCacheService.swift */; };
+		CCCC0021 /* XMPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBB001E /* XMPService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -69,6 +70,7 @@
 		BBBB001B /* LoupePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoupePanelView.swift; sourceTree = "<group>"; };
 		BBBB001C /* PixelSimilarityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelSimilarityService.swift; sourceTree = "<group>"; };
 		BBBB001D /* SimilarityCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarityCacheService.swift; sourceTree = "<group>"; };
+		BBBB001E /* XMPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XMPService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +136,7 @@
 				AAAA000000000000BBBB0016 /* VisionService.swift */,
 				BBBB001C /* PixelSimilarityService.swift */,
 				BBBB001D /* SimilarityCacheService.swift */,
+				BBBB001E /* XMPService.swift */,
 				AAAA000000000000BBBB0017 /* SessionStore.swift */,
 			);
 			path = Services;
@@ -255,6 +258,7 @@
 				CCCC0018 /* LoupePanelView.swift in Sources */,
 				CCCC0019 /* PixelSimilarityService.swift in Sources */,
 				CCCC0020 /* SimilarityCacheService.swift in Sources */,
+				CCCC0021 /* XMPService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
